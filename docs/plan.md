@@ -13,8 +13,8 @@ Use the Amazon 1P vendor finance data to make the business run better: recover m
 Figures come from the demo data (July 2021 – April 2025) and were checked with direct SQL on 2026-10-23. Deduction figures are **cash actually deducted** (see Data facts for why claim amounts on remittance lines can't simply be summed).
 
 1. **Shortage recovery.** Amazon deducted **$3.14M** for shortages across 1,470 claims, while shortage disputes recovered only **$43.7K**. Even if the dispute table covers only part of the period (it starts Feb 2023), this is the largest recoverable amount. The workflow: find shortages that can still be disputed → create an action item → track the outcome → measure the recovery rate.
-2. **Unexplained deductions.** **$1.82M** was deducted across 595 claims with no description from Amazon (`-____-`); those claims total $3.99M. Classify them (`AI_CLASSIFY` plus invoice-number patterns) so every deducted dollar has a category and an owner. Smaller categories to track as well: Missed adjustment ($99K), Damage allowance ($98K), AVS/SVS ($94K), operational chargebacks ($70K) and returns ($60K). Total deducted across all categories is **$5.39M**.
-3. **Cash collection.** Invoiced **$10.29M**, paid **$10.00M** (a collection rate of 97.1%), about **$294K unpaid**. That includes 60 invoices worth about $150K still processing, pending Amazon action or queued for payment, plus price and quantity variances on paid invoices. A further **$2.49M** has been claimed by Amazon but not yet deducted, which is an early warning of future deductions.
+2. **Deduction visibility.** Amazon sends 595 deduction lines ($1.82M deducted) with no description (`-____-`). **Solved with deterministic matching, not AI:** 451 of the 461 unlabeled claims match a co-op invoice on exact amount, typically 2 days after the co-op invoice date. They are co-op charges ($1.81M), so **99.8% of deducted dollars now have a category**, and only 10 claims ($9.4K) remain unresolved. Remaining work: watch co-op invoices with no matching deduction. There are 60 of them ($282K): 22 recent ones ($115K, March–April 2025) are probably still to be deducted, and 38 older ones ($167K) need review. Total deducted across all categories is **$5.39M**: Shortage $3.14M, Co-op $1.81M, Missed adjustment $99K, Damage allowance $98K, AVS/SVS $94K, operational chargebacks $70K, Returns $60K.
+3. **Cash collection.** Invoiced **$10.29M**, paid **$10.00M** (a collection rate of 97.1%), about **$294K unpaid**. That includes 60 invoices worth about $150K still processing, pending Amazon action or queued for payment, plus price and quantity variances on paid invoices. A further **$346K** has been claimed by Amazon but not yet deducted, mostly damage allowances ($178K) and AVS/SVS ($125K). That's an early warning of future deductions.
 
 **Provisions are not deductions.** `PROVISION_FOR_RECEIVABLE` lines hold back cash (−$20.53M applied) and `PROVISION_FOR_RECEIVABLE-R` lines release it (+$20.38M), leaving about $146K currently held. Provisions are tracked as a separate "reserve held" metric and never counted as deductions.
 
@@ -34,12 +34,13 @@ Figures come from the demo data (July 2021 – April 2025) and were checked with
 - **Repeated claim amounts:** a deduction claim applied across several payments repeats its **full** amount on each remittance line, while `amount_paid` splits it. Never sum `invoice_amount` over remittance lines. Use `STAGING.STG_DEDUCTION_CLAIMS` (one row per claim, with `claim_amount` counted once and `deducted_amount` as the cash actually taken).
 - **Shortage claims link to invoices:** a shortage claim number is `<invoice_number>-<n>SC` (1,571 of 1,583 lines match an invoice). `STG_REMITTANCE_LINES.base_invoice_number` holds the extracted invoice number.
 - **Disputes barely link to claims:** only 76 of 721 disputed invoice numbers match a shortage claim's invoice, and 204 match an invoice at all. Measure recovery from the dispute table directly; treat claim-level "disputed or not" as approximate.
+- **Unlabeled deductions are co-op:** unlabeled lines carry no text and no reference number, only an amount, a date and a payment. They are grouped into claims by date + amount, then matched one-to-one to `payments_coop` on exact amount within −30/+5 days (`STAGING.STG_COOP_DEDUCTION_MATCH`). `STG_DEDUCTION_CLAIMS` exposes `source_category`, the resolved `category` and `category_method` (Amazon label / Matched to co-op invoice / Unresolved), so every category is auditable. AI classification was not used because there is no text to classify.
 
 ## The five layers: what we build in each
 | Layer | Snowflake build |
 |---|---|
-| **Context** | A semantic view with verified queries, a cleaned layer of views, dynamic tables for summaries, deduction categories from `AI_CLASSIFY`, and tags or masking where needed. |
-| **Toolkit** | Cortex Analyst on the semantic view, Cortex Search over dispute comments and product titles, and procedures for logic with a single correct answer (whether a shortage can still be disputed, expected payment). |
+| **Context** | A semantic view with verified queries, a cleaned layer of views, dynamic tables for summaries, deduction categories from deterministic matching (co-op), and tags or masking where needed. (The dataset has almost no free text, so no AI classification is needed.) |
+| **Toolkit** | Cortex Analyst on the semantic view, Cortex Search over product titles, and procedures for logic with a single correct answer (whether a shortage can still be disputed, expected payment). |
 | **Intelligence** | One Amazon finance Cortex Agent (`orchestration: auto`), plus an evaluation set and Agent Evaluations. |
 | **Action** | An `ACTION_ITEMS` table written to through procedures, Snowflake alerts to Slack, and scheduled digests. Daily-generated **insights** and **recommended actions**, each with an estimated dollar value; accepting one creates an action item. |
 | **Surface** | The Next.js app (teammate), Claude through the MCP server, and CoWork. |
@@ -80,7 +81,7 @@ The platform team keeps these names and shapes stable. Anything not listed here 
    - net PPM by product.
 
 **Phase 2: Summary tables and enrichment (Context and Toolkit). Owner: platform.**
-6. **Deduction classification:** use `AI_CLASSIFY` on the lines with no description, plus invoice-number patterns, and store the results in `STAGING.DEDUCTION_CLASSIFICATION` along with confidence and method. Review a sample by hand before using the results.
+6. **Deduction categories: done in Phase 1.** Co-op matching resolves 99.8% of deducted dollars (`STAGING.STG_COOP_DEDUCTION_MATCH`). This dataset has almost no free text (dispute `comments` are empty in all 1,114 rows; remittance descriptions are codes), so there's nothing to AI-classify. AI functions are used for writing insights (`AI_COMPLETE`, Phase 4b) and in the agent. If real data later brings dispute comments or Amazon correspondence, add `AI_CLASSIFY` on denial reasons then.
 7. Build dynamic tables in `MARTS` with a 1-hour refresh lag:
    - `SHORTAGE_RECOVERY`: by month, deducted vs disputed vs recovered;
    - `DISPUTABLE_SHORTAGES`: line-level shortages, whether they've been disputed, and age;
@@ -90,7 +91,7 @@ The platform team keeps these names and shapes stable. Anything not listed here 
    - `COOP_BY_AGREEMENT`;
    - `MONTHLY_PNL`;
    - `SKU_PROFITABILITY`.
-8. Create a Cortex Search service `OPS.AMZ_TEXT_SEARCH` over dispute comments, product titles and remittance descriptions.
+8. Create a Cortex Search service `OPS.AMZ_TEXT_SEARCH` over product titles (ASIN lookup by name, e.g. "the turmeric daal pot"), so chat can resolve product names to ASINs. Dispute comments are empty in this data.
 
 **Phase 3: Agent (Intelligence and Toolkit). Owner: platform.**
 9. Create `APP.AMAZON_VENDOR_FINANCE_AGENT` (spec in `agent/AMAZON_VENDOR_FINANCE_AGENT.agent.yaml`) with these tools:
@@ -104,7 +105,7 @@ The platform team keeps these names and shapes stable. Anything not listed here 
    Instructions: be concise, put numbers in tables, name the source of each answer, never count provisions as deductions, and confirm before taking any action. Then remove the Amazon tool from `SALES_INTELLIGENCE_AGENT`.
 
 **Phase 4: Action items written to Snowflake (Action). Owner: platform.**
-10. Create `OPS.ACTION_ITEMS` with these columns: id, type (dispute_shortage, classify_deduction, chase_payment, coop_review, price_fix), entity type and id (invoice, ASIN or PO), amount, priority, owner, status (open, in_progress, done, dismissed), due date, created_by, created_at, source (agent, user or alert), notes and outcome amount (what was recovered).
+10. Create `OPS.ACTION_ITEMS` with these columns: id, type (dispute_shortage, resolve_deduction, chase_payment, coop_review, price_fix), entity type and id (invoice, ASIN or PO), amount, priority, owner, status (open, in_progress, done, dismissed), due date, created_by, created_at, source (agent, user or alert), notes and outcome amount (what was recovered).
 11. Write procedures that validate input, record `CURRENT_USER()`, and change nothing but `ACTION_ITEMS`. Add the view `ACTION_ITEMS_V`, filtered by role.
 
 **Phase 4b: Insights and recommended actions (Action and Intelligence). Owner: platform.**
@@ -112,7 +113,7 @@ The platform team keeps these names and shapes stable. Anything not listed here 
    - shortage deducted this month vs the 6-month average (spike detection);
    - shortages approaching the end of the dispute window that haven't been disputed;
    - recovery rate trend;
-   - new or growing uncategorized deductions;
+   - new or growing unresolved deductions, and co-op invoices with no matching deduction;
    - unpaid amount by aging bucket, and its change week over week;
    - ASINs with repeated shortages (a likely receiving or carton-labelling problem);
    - co-op spend vs sales by agreement;
@@ -128,7 +129,7 @@ The platform team keeps these names and shapes stable. Anything not listed here 
     - a new shortage that can be disputed, above a threshold;
     - an invoice unpaid for more than 60 days;
     - a dispute denied;
-    - a large deduction that couldn't be categorized.
+    - a large deduction that couldn't be resolved, or a co-op invoice with no matching deduction after 30 days.
 14. **Claude via MCP:**
     - create `APP.AMAZON_FINANCE_MCP` exposing the agent (`CORTEX_AGENT_RUN`, read-only hints);
     - create a public OAuth integration (PKCE) with redirect `https://claude.ai/api/mcp/auth_callback`, `ALLOWED_ROLES_LIST = (AMZ_FIN_USER)` and secondary roles off;

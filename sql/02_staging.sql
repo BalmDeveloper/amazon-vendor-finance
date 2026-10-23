@@ -71,13 +71,17 @@ FROM AMAZON_VENDOR_PL_FINANCE_REMITTANCE_AND_INVOICES_DEMO_DATASET.PUBLIC."payme
 -- One row per deduction claim. A claim applied across several payments repeats
 -- its full amount on every remittance line, so the claim amount is taken once
 -- and the cash actually deducted is the sum of applied amounts.
+-- Unlabeled lines have no reference number, so they are grouped by date + amount.
 -- Amounts are positive (money Amazon took).
-CREATE OR REPLACE VIEW STG_DEDUCTION_CLAIMS COMMENT = 'One row per Amazon deduction claim (provisions excluded)' AS
+CREATE OR REPLACE VIEW STG_DEDUCTION_CLAIMS_RAW COMMENT = 'One row per Amazon deduction claim, source categories only' AS
 SELECT
-    COALESCE(reference_number, 'LINE-' || line_id)  AS claim_id,
+    COALESCE(reference_number,
+             IFF(category = 'Unlabeled',
+                 'UNL-' || TO_CHAR(line_date, 'YYYYMMDD') || '-' || TO_CHAR(-line_amount),
+                 'LINE-' || line_id))               AS claim_id,
     ANY_VALUE(reference_number)                     AS reference_number,
     ANY_VALUE(base_invoice_number)                  AS base_invoice_number,
-    category,
+    category                                        AS source_category,
     ANY_VALUE(raw_description)                      AS raw_description,
     MIN(line_date)                                  AS claim_date,
     COUNT(DISTINCT payment_number)                  AS payments_applied,
@@ -87,6 +91,49 @@ SELECT
 FROM STG_REMITTANCE_LINES
 WHERE is_deduction
 GROUP BY 1, category;
+
+-- Unlabeled deductions are co-op charges: they match a co-op invoice on exact
+-- amount, typically 2 days after the co-op invoice date. Match each unlabeled
+-- claim to at most one co-op invoice (closest date, one-to-one).
+CREATE OR REPLACE VIEW STG_COOP_DEDUCTION_MATCH COMMENT = 'Unlabeled deduction claims matched to co-op invoices' AS
+WITH candidates AS (
+    SELECT d.claim_id, c.coop_invoice_id, c.agreement_title, c.funding_type,
+           ABS(DATEDIFF('day', c.coop_date, d.claim_date)) AS lag_days
+    FROM STG_DEDUCTION_CLAIMS_RAW d
+    JOIN STG_COOP c
+      ON ROUND(c.coop_amount, 2) = ROUND(d.claim_amount, 2)
+     AND c.coop_date BETWEEN d.claim_date - 30 AND d.claim_date + 5
+    WHERE d.source_category = 'Unlabeled'
+),
+best_per_claim AS (
+    SELECT * FROM candidates
+    QUALIFY ROW_NUMBER() OVER (PARTITION BY claim_id ORDER BY lag_days, coop_invoice_id) = 1
+)
+SELECT * FROM best_per_claim
+QUALIFY ROW_NUMBER() OVER (PARTITION BY coop_invoice_id ORDER BY lag_days, claim_id) = 1;
+
+-- Final claim view: source category, resolved category and how it was resolved.
+CREATE OR REPLACE VIEW STG_DEDUCTION_CLAIMS COMMENT = 'One row per Amazon deduction claim (provisions excluded), with resolved category' AS
+SELECT
+    d.claim_id,
+    d.reference_number,
+    d.base_invoice_number,
+    d.source_category,
+    CASE WHEN m.coop_invoice_id IS NOT NULL THEN 'Co-op' ELSE d.source_category END AS category,
+    CASE WHEN d.source_category <> 'Unlabeled' THEN 'Amazon label'
+         WHEN m.coop_invoice_id IS NOT NULL    THEN 'Matched to co-op invoice'
+         ELSE 'Unresolved' END                  AS category_method,
+    m.coop_invoice_id,
+    m.agreement_title                           AS coop_agreement_title,
+    m.funding_type                              AS coop_funding_type,
+    d.raw_description,
+    d.claim_date,
+    d.payments_applied,
+    d.claim_amount,
+    d.deducted_amount,
+    d.not_yet_applied_amount
+FROM STG_DEDUCTION_CLAIMS_RAW d
+LEFT JOIN STG_COOP_DEDUCTION_MATCH m ON m.claim_id = d.claim_id;
 
 -- One row per payment from Amazon
 CREATE OR REPLACE VIEW STG_PAYMENTS COMMENT = 'Payments Amazon made to the vendor' AS
