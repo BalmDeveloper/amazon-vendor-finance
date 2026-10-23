@@ -97,10 +97,25 @@ tables:
         expr: CATEGORY
         data_type: VARCHAR
         description: >
-          Deduction type: Shortage, Unlabeled (no description from Amazon), Damage allowance,
-          Vendor services (AVS/SVS), Missed adjustment, Operational chargeback, Returns, Overcharge, Other.
+          Deduction type: Shortage, Co-op, Missed adjustment, Damage allowance, Vendor services (AVS/SVS),
+          Operational chargeback, Returns, Overcharge, Other, or Unlabeled (no description and no match found).
+          Co-op deductions arrive unlabeled from Amazon and are identified by matching to co-op invoices.
         synonyms: [deduction type, chargeback type, deduction category]
         is_enum: true
+      - name: CATEGORY_METHOD
+        expr: CATEGORY_METHOD
+        data_type: VARCHAR
+        description: How the category was assigned - Amazon label, Matched to co-op invoice, or Unresolved.
+        is_enum: true
+      - name: COOP_INVOICE_ID
+        expr: COOP_INVOICE_ID
+        data_type: VARCHAR
+        description: Co-op invoice a co-op deduction was matched to.
+      - name: COOP_AGREEMENT_TITLE
+        expr: COOP_AGREEMENT_TITLE
+        data_type: VARCHAR
+        description: Co-op agreement of a matched co-op deduction.
+        synonyms: [coop agreement]
     time_dimensions:
       - name: CLAIM_DATE
         expr: CLAIM_DATE
@@ -297,6 +312,14 @@ verified_queries:
       FROM invoices
       WHERE price_variance <> 0 OR invoice_status ILIKE '%PRICE_DISCREPANCY%'
       ORDER BY ABS(price_variance) DESC
+  - name: deductions_by_category_method
+    question: How much of our deductions are categorized?
+    sql: |
+      SELECT category_method, COUNT(*) AS claims, SUM(deducted_amount) AS deducted,
+             DIV0(SUM(deducted_amount), SUM(SUM(deducted_amount)) OVER ()) AS share_of_deducted
+      FROM deductions
+      GROUP BY category_method
+      ORDER BY deducted DESC
 $$, FALSE);
 
 GRANT SELECT ON SEMANTIC VIEW AMAZON_FINANCE_APP.SEMANTIC.AMAZON_VENDOR_FINANCE_SV TO ROLE AMZ_FIN_USER;
