@@ -1,7 +1,7 @@
 import "server-only";
 import { plainRows, widgetChart } from "./charts";
 import { callProc, json, sql, sqlLongRaw, type ProcResult } from "./snowflake";
-import type { ActionItem, ActionStatus, ChartConfig, Chat, Dashboard, DashboardStatus, Insight, Message, Recommendation, WidgetData } from "./types";
+import type { ActionItem, ActionStatus, ChartConfig, Chat, Dashboard, DashboardStatus, Insight, Message, Metrics, Recommendation, WidgetData } from "./types";
 
 // All reads run as the signed-in user; all writes go through owner's-rights procedures,
 // which validate input and record CURRENT_USER().
@@ -186,4 +186,32 @@ export async function acceptRecommendation(id: string, owner: string | null) {
 
 export async function dismissRecommendation(id: string, reason: string | null) {
   return ok(await callProc("AMAZON_FINANCE_APP.OPS.DISMISS_RECOMMENDATION", [id, reason]));
+}
+
+// ---------- metrics ----------
+/** Success metrics from docs/plan.md, shown on the Today page. */
+export async function getMetrics(): Promise<Metrics> {
+  const [m] = await sql<Record<keyof Metrics, unknown>>(
+    `SELECT
+       ROUND(100 * (SELECT SUM(resolved_amount) FROM AMAZON_FINANCE_APP.STAGING.STG_DISPUTES)
+             / NULLIF((SELECT SUM(deducted_amount) FROM AMAZON_FINANCE_APP.STAGING.STG_DEDUCTION_CLAIMS WHERE category = 'Shortage'), 0), 2)
+         AS shortage_recovery_rate_pct,
+       ROUND(100 * (SELECT SUM(IFF(category_method <> 'Unresolved', deducted_amount, 0)) / NULLIF(SUM(deducted_amount), 0)
+                      FROM AMAZON_FINANCE_APP.STAGING.STG_DEDUCTION_CLAIMS), 2) AS deduction_categorized_pct,
+       (SELECT COALESCE(SUM(unpaid_amount), 0) FROM AMAZON_FINANCE_APP.STAGING.STG_INVOICES
+         WHERE invoice_status_group <> 'PAID' AND unpaid_amount > 0
+           AND DATEDIFF('day', COALESCE(payment_due_date, invoice_date), CURRENT_DATE()) > 60) AS unpaid_over_60d_usd,
+       (SELECT MEDIAN(DATEDIFF('hour', r.created_at, a.created_at))
+          FROM AMAZON_FINANCE_APP.OPS.RECOMMENDED_ACTIONS r
+          JOIN AMAZON_FINANCE_APP.OPS.ACTION_ITEMS a ON a.action_item_id = r.action_item_id) AS median_hours_to_action,
+       (SELECT COALESCE(SUM(resolved_amount), 0) FROM AMAZON_FINANCE_APP.STAGING.STG_DISPUTES)
+         + (SELECT COALESCE(SUM(outcome_amount_usd), 0) FROM AMAZON_FINANCE_APP.OPS.ACTION_ITEMS) AS recovered_to_date_usd`,
+  );
+  return {
+    shortage_recovery_rate_pct: Number(m.shortage_recovery_rate_pct ?? 0),
+    deduction_categorized_pct: Number(m.deduction_categorized_pct ?? 0),
+    unpaid_over_60d_usd: Number(m.unpaid_over_60d_usd ?? 0),
+    median_hours_to_action: m.median_hours_to_action == null ? null : Number(m.median_hours_to_action),
+    recovered_to_date_usd: Number(m.recovered_to_date_usd ?? 0),
+  };
 }
