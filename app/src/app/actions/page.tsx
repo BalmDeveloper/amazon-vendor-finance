@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { CheckSquare, Circle, CircleCheck, CircleDot, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,13 +10,13 @@ import type { ActionItem } from "@/lib/types";
 
 const COLUMNS: { key: ActionItem["status"]; label: string; icon: typeof Circle; tone: string }[] = [
   { key: "open", label: "To do", icon: Circle, tone: "text-muted-foreground" },
-  { key: "in_progress", label: "In progress", icon: CircleDot, tone: "text-sky-600" },
-  { key: "done", label: "Done", icon: CircleCheck, tone: "text-emerald-600" },
+  { key: "in_progress", label: "In progress", icon: CircleDot, tone: "text-info" },
+  { key: "done", label: "Done", icon: CircleCheck, tone: "text-success" },
 ];
 const NEXT: Record<ActionItem["status"], ActionItem["status"]> = { open: "in_progress", in_progress: "done", done: "open" };
 const PRIORITY: Record<string, string> = {
-  high: "bg-red-50 text-red-700 border-red-200",
-  medium: "bg-amber-50 text-amber-700 border-amber-200",
+  high: "bg-danger-soft text-destructive border-destructive/30",
+  medium: "bg-warning-soft text-warning border-warning/30",
   low: "bg-muted text-muted-foreground",
 };
 
@@ -32,20 +33,28 @@ export default function ActionsPage() {
   useEffect(() => { load(); }, [load]);
 
   async function setStatus(id: string, status: ActionItem["status"]) {
+    const before = items;
     setItems((all) => all?.map((i) => (i.id === id ? { ...i, status } : i)) ?? null);
-    await fetch(`/api/actions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    const r = await fetch(`/api/actions/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    if (!r.ok) { setItems(before); toast.error("Couldn't update the item"); }
+    else if (status === "done") toast.success("Marked as done");
   }
 
   async function remove(id: string) {
+    const before = items;
+    const removed = items?.find((i) => i.id === id);
     setItems((all) => all?.filter((i) => i.id !== id) ?? null);
-    await fetch(`/api/actions/${id}`, { method: "DELETE" });
+    const r = await fetch(`/api/actions/${id}`, { method: "DELETE" });
+    if (!r.ok) { setItems(before); toast.error("Couldn't delete the item"); }
+    else toast("Action item deleted", { description: removed?.title });
   }
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
     const r = await fetch("/api/actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title }) });
-    if (r.ok) { setTitle(""); load(); }
+    if (r.ok) { setTitle(""); load(); toast.success("Action item added"); }
+    else toast.error("Couldn't add the item");
   }
 
   const open = items?.filter((i) => i.status !== "done").length ?? 0;
@@ -54,11 +63,11 @@ export default function ActionsPage() {
   return (
     <div className="h-full overflow-y-auto">
       <header className="border-b bg-background">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-8 py-5">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 sm:px-8 py-5">
           <div>
             <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight"><CheckSquare className="size-5" /> Action items</h1>
             <p className="text-sm text-muted-foreground">
-              {items ? <>{open} open{high > 0 && <> · <span className="text-red-600">{high} high priority</span></>}</> : "Follow-ups from your sales conversations"}
+              {items ? <>{open} open{high > 0 && <> · <span className="text-destructive">{high} high priority</span></>}</> : "Follow-ups from your sales conversations"}
             </p>
           </div>
           <form onSubmit={add} className="flex w-full max-w-sm gap-2">
@@ -68,9 +77,9 @@ export default function ActionsPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-8 py-6">
+      <div className="mx-auto max-w-7xl px-4 sm:px-8 py-6">
         {unavailable && (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <div className="mb-4 rounded-lg border border-warning/30 bg-warning-soft px-4 py-2.5 text-sm text-warning">
             Action items are stored in Snowflake. Connect it on the Integrations page to see and add items.
           </div>
         )}

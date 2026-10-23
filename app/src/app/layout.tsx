@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Nav } from "@/components/Nav";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Providers } from "@/components/Providers";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,21 +15,23 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sales Intelligence Hub",
-  description: "Claude + Snowflake Cortex Agent: chat, dashboards and action items",
+  title: "Vendor Finance · Claude × Snowflake",
+  description: "Insights, dashboards, chat and action items on governed Snowflake data",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="h-full flex bg-muted/30 text-foreground">
-        <TooltipProvider>
+      <body className="flex h-full bg-muted/30 text-foreground">
+        <Providers>
           <Nav />
-          <main className="flex-1 min-w-0 h-full overflow-hidden">{children}</main>
-        </TooltipProvider>
+          {/* pt-12 leaves room for the mobile top bar */}
+          <main className="h-full min-w-0 flex-1 overflow-hidden pt-12 md:pt-0">{children}</main>
+        </Providers>
       </body>
     </html>
   );

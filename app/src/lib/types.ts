@@ -74,3 +74,33 @@ export type Widget = {
   spec: ChartSpec;
   position: number;
 };
+
+/** MARTS.INSIGHTS row (see docs/plan.md, App interface). */
+export type Insight = {
+  id: string;
+  generated_at: string;
+  problem_area: "shortage_recovery" | "unexplained_deductions" | "cash_collection" | string;
+  severity: "high" | "medium" | "low";
+  title: string;
+  summary: string;
+  metric: string;
+  current_value: number | null;
+  comparison_value: number | null;
+  change_pct: number | null;
+  evidence_sql?: string | null;
+  related_entity?: string | null;
+};
+
+/** MARTS.RECOMMENDED_ACTIONS row (see docs/plan.md, App interface). */
+export type Recommendation = {
+  id: string;
+  insight_id: string | null;
+  action_type: string;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  estimated_value_usd: number;
+  confidence: number; // 0–1
+  rationale: string;
+  status: "new" | "accepted" | "dismissed";
+  expires_at?: string | null;
+};

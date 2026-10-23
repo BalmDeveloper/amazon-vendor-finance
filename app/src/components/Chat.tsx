@@ -109,8 +109,11 @@ export function Chat() {
             ))}
           </nav>
         </aside>
-        <section className="min-w-0 flex-1 bg-background">
-          <Thread components={{ Welcome }} />
+        <section className="flex min-w-0 flex-1 flex-col bg-background">
+          <div className="flex items-center justify-end border-b px-3 py-1.5 md:hidden">
+            <Button size="sm" variant="ghost" onClick={newChat}><MessageSquarePlus /> New conversation</Button>
+          </div>
+          <div className="min-h-0 flex-1"><Thread components={{ Welcome }} /></div>
         </section>
       </div>
     </AssistantRuntimeProvider>

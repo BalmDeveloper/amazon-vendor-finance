@@ -22,6 +22,13 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-danger-soft: var(--danger-soft);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -74,12 +81,19 @@ body {
 .prose-chat ul { list-style: disc; padding-left: 1.25rem; margin: 0.4rem 0; }
 .prose-chat ol { list-style: decimal; padding-left: 1.25rem; margin: 0.4rem 0; }
 .prose-chat strong { font-weight: 600; }
-.prose-chat code { font-family: var(--font-geist-mono); background: #f4f4f5; padding: 0 0.25rem; border-radius: 4px; font-size: 0.85em; }
+.prose-chat code { font-family: var(--font-geist-mono); background: var(--muted); padding: 0 0.25rem; border-radius: 4px; font-size: 0.85em; }
 .prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 0.6rem 0 0.3rem; }
 .prose-chat table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.85rem; }
-.prose-chat th, .prose-chat td { border: 1px solid #e4e4e7; padding: 0.25rem 0.5rem; text-align: left; }
+.prose-chat th, .prose-chat td { border: 1px solid var(--border); padding: 0.25rem 0.5rem; text-align: left; }
 
 :root {
+  --success: oklch(0.52 0.13 155);
+  --success-soft: oklch(0.96 0.04 155);
+  --warning: oklch(0.55 0.13 70);
+  --warning-soft: oklch(0.97 0.05 85);
+  --info: oklch(0.52 0.14 240);
+  --info-soft: oklch(0.96 0.03 240);
+  --danger-soft: oklch(0.96 0.03 25);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -115,6 +129,13 @@ body {
 }
 
 .dark {
+  --success: oklch(0.78 0.14 155);
+  --success-soft: oklch(0.30 0.06 155);
+  --warning: oklch(0.82 0.13 80);
+  --warning-soft: oklch(0.32 0.06 75);
+  --info: oklch(0.78 0.12 240);
+  --info-soft: oklch(0.30 0.06 240);
+  --danger-soft: oklch(0.30 0.07 25);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -133,11 +154,11 @@ body {
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --chart-1: oklch(0.70 0.15 240);
+  --chart-2: oklch(0.76 0.15 55);
+  --chart-3: oklch(0.72 0.14 160);
+  --chart-4: oklch(0.68 0.17 295);
+  --chart-5: oklch(0.70 0.18 15);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);

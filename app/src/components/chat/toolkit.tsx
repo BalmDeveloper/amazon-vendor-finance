@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { Toolkit, ToolCallMessagePartComponent } from "@assistant-ui/react";
 import { AlertCircle, ArrowUpRight, CheckCircle2, CheckSquare, Database, LayoutDashboard, Loader2, Pin } from "lucide-react";
 import { ChartCard } from "@/components/ChartCard";
@@ -14,13 +16,13 @@ const SnowflakeQuery: ToolCallMessagePartComponent = ({ args, result }) => {
   const q = String((args as Record<string, unknown>)?.message ?? (args as Record<string, unknown>)?.query ?? (args as Record<string, unknown>)?.question ?? "");
   return (
     <div className="my-1.5 flex items-start gap-2.5 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
-      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-sky-100 text-sky-700">
+      <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-info-soft text-info">
         <Database className="size-3.5" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 font-medium">
           Snowflake Cortex Agent
-          {result ? <CheckCircle2 className="size-3.5 text-emerald-600" /> : <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+          {result ? <CheckCircle2 className="size-3.5 text-success" /> : <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         </div>
         {q && <div className="truncate text-muted-foreground">{q}</div>}
       </div>
@@ -31,11 +33,14 @@ const SnowflakeQuery: ToolCallMessagePartComponent = ({ args, result }) => {
 const Quiet: ToolCallMessagePartComponent = () => null;
 
 function PinnableChart({ spec }: { spec: ChartSpec }) {
+  const router = useRouter();
   const [state, setState] = useState<"idle" | "saving" | "pinned">("idle");
   async function pin() {
     setState("saving");
     const r = await fetch("/api/dashboards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ spec }) });
     setState(r.ok ? "pinned" : "idle");
+    if (r.ok) toast.success("Pinned to dashboard", { action: { label: "Open", onClick: () => router.push("/dashboard") } });
+    else toast.error("Couldn't pin this chart");
   }
   return (
     <ChartCard
@@ -57,9 +62,9 @@ const DashboardUI: ToolCallMessagePartComponent = ({ result }) => {
   const d = result as Extract<AgentEvent, { type: "dashboard" }> | undefined;
   if (!d) return null;
   return (
-    <Card size="sm" className="my-3 bg-gradient-to-br from-sky-50 to-background">
+    <Card size="sm" className="my-3 bg-gradient-to-br from-info-soft to-background">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><LayoutDashboard className="size-4 text-sky-700" /> {d.name}</CardTitle>
+        <CardTitle className="flex items-center gap-2"><LayoutDashboard className="size-4 text-info" /> {d.name}</CardTitle>
         <CardDescription>Dashboard ready · {d.widgets} widgets</CardDescription>
         <CardAction>
           <Link href={`/dashboard?d=${encodeURIComponent(d.id)}`} className={buttonVariants({ size: "sm" })}>
@@ -72,8 +77,8 @@ const DashboardUI: ToolCallMessagePartComponent = ({ result }) => {
 };
 
 const PRIORITY: Record<string, string> = {
-  high: "bg-red-50 text-red-700 border-red-200",
-  medium: "bg-amber-50 text-amber-700 border-amber-200",
+  high: "bg-danger-soft text-destructive border-destructive/30",
+  medium: "bg-warning-soft text-warning border-warning/30",
   low: "bg-muted text-muted-foreground",
 };
 
@@ -83,7 +88,7 @@ const ActionsUI: ToolCallMessagePartComponent = ({ result }) => {
   return (
     <Card size="sm" className="my-3">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><CheckSquare className="size-4 text-emerald-600" /> {items.length} action item{items.length > 1 ? "s" : ""} added</CardTitle>
+        <CardTitle className="flex items-center gap-2"><CheckSquare className="size-4 text-success" /> {items.length} action item{items.length > 1 ? "s" : ""} added</CardTitle>
         <CardAction>
           <Link href="/actions" className={buttonVariants({ size: "sm", variant: "ghost" })}>View board <ArrowUpRight /></Link>
         </CardAction>

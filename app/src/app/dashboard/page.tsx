@@ -2,7 +2,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LayoutDashboard, Sparkles, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
 import { ChartCard } from "@/components/ChartCard";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -21,6 +23,7 @@ export default function DashboardPage() {
   const [active, setActive] = useState("");
   const [widgets, setWidgets] = useState<Widget[] | null>(null);
   const [sample, setSample] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => {
     const wanted = new URLSearchParams(window.location.search).get("d");
@@ -54,13 +57,18 @@ export default function DashboardPage() {
   }
 
   async function removeWidget(id: string) {
+    const before = widgets;
     setWidgets((w) => w?.filter((x) => x.id !== id) ?? null);
-    if (!sample) await fetch(`/api/dashboards?widget=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (sample) return;
+    const r = await fetch(`/api/dashboards?widget=${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (r.ok) toast("Widget removed");
+    else { setWidgets(before); toast.error("Couldn't remove the widget"); }
   }
 
   async function removeDashboard(id: string) {
-    if (!confirm("Delete this dashboard and all its widgets?")) return;
-    await fetch(`/api/dashboards/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const r = await fetch(`/api/dashboards/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!r.ok) { toast.error("Couldn't delete the dashboard"); return; }
+    toast.success("Dashboard deleted");
     const rest = dashboards?.filter((d) => d.id !== id) ?? [];
     setDashboards(rest);
     select(rest[0]?.id ?? "");
@@ -73,17 +81,17 @@ export default function DashboardPage() {
   return (
     <div className="h-full overflow-y-auto">
       <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-8 py-5 flex items-center justify-between gap-4">
+        <div className="mx-auto max-w-7xl px-4 sm:px-8 py-5 flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-semibold tracking-tight truncate">{current?.name ?? "Dashboards"}</h1>
-              {sample && <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50">Sample data</Badge>}
+              {sample && <Badge variant="outline" className="text-warning border-warning/30 bg-warning-soft">Sample data</Badge>}
             </div>
             <p className="text-sm text-muted-foreground">Live insights from Snowflake · built by Claude</p>
           </div>
           <div className="flex items-center gap-2">
             {current && !sample && current.id !== "default" && (
-              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => removeDashboard(current.id)}>
+              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setConfirmDelete(true)}>
                 <Trash2 /> Delete
               </Button>
             )}
@@ -93,7 +101,7 @@ export default function DashboardPage() {
           </div>
         </div>
         {dashboards && dashboards.length > 1 && (
-          <div className="mx-auto max-w-7xl px-8 pb-3">
+          <div className="mx-auto max-w-7xl px-4 sm:px-8 pb-3">
             <Tabs value={active} onValueChange={(v) => select(String(v))}>
               <TabsList>
                 {dashboards.map((d) => (
@@ -108,9 +116,9 @@ export default function DashboardPage() {
         )}
       </header>
 
-      <div className="mx-auto max-w-7xl px-8 py-6 space-y-4">
+      <div className="mx-auto max-w-7xl px-4 sm:px-8 py-6 space-y-4">
         {sample && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <div className="rounded-lg border border-warning/30 bg-warning-soft px-4 py-2.5 text-sm text-warning">
             Showing sample data. Connect Snowflake on the Integrations page to load your dashboards.
           </div>
         )}
@@ -147,6 +155,16 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Delete "${current?.name ?? "dashboard"}"?`}
+        description="This removes the dashboard and all of its widgets. This can't be undone."
+        confirmLabel="Delete dashboard"
+        destructive
+        onConfirm={() => { setConfirmDelete(false); if (current) removeDashboard(current.id); }}
+      />
     </div>
   );
 }
@@ -169,7 +187,7 @@ function KpiStrip({ widget, onRemove }: { widget: Widget; onRemove?: () => void 
               <div className="mt-1 text-2xl font-semibold tracking-tight tabular-nums">{fmt(d.value)}</div>
               {delta != null && (
                 <div className="mt-1 flex items-center gap-1 text-xs">
-                  <span className={`rounded px-1.5 py-0.5 font-medium ${delta >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                  <span className={`rounded px-1.5 py-0.5 font-medium ${delta >= 0 ? "bg-success-soft text-success" : "bg-danger-soft text-destructive"}`}>
                     {delta >= 0 ? "+" : ""}{delta.toFixed(1)}%
                   </span>
                   <span className="text-muted-foreground">vs prior period</span>

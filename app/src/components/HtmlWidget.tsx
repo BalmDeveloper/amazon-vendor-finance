@@ -1,5 +1,6 @@
 "use client";
 import { useMemo } from "react";
+import { useTheme } from "next-themes";
 
 // Agent-authored HTML widgets run in an iframe with sandbox="allow-scripts" and
 // no allow-same-origin, so they get an opaque origin: no access to the app's
@@ -13,6 +14,7 @@ const BASE_CSS = `
           --c4: oklch(0.58 0.19 295); --c5: oklch(0.65 0.20 15); --muted: #71717a; --border: #e4e4e7; }
   * { box-sizing: border-box; }
   html, body { margin: 0; font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; color: #18181b; background: transparent; }
+  html.dark, html.dark body { color: #fafafa; } html.dark { --muted: #a1a1aa; --border: #3f3f46; }
   .muted { color: var(--muted); } .num { font-variant-numeric: tabular-nums; }
   .row { display: flex; gap: 8px; align-items: center; } .grid { display: grid; gap: 8px; }
   .bar { height: 8px; border-radius: 4px; background: var(--c1); }
@@ -20,13 +22,14 @@ const BASE_CSS = `
 `;
 
 export function HtmlWidget({ html, data, height }: { html: string; data: unknown; height: number }) {
+  const dark = useTheme().resolvedTheme === "dark";
   const srcDoc = useMemo(
-    () => `<!doctype html><html><head><meta charset="utf-8">
+    () => `<!doctype html><html${dark ? ' class="dark"' : ""}><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${CSP}">
 <style>${BASE_CSS}</style>
 <script>window.DATA = ${JSON.stringify(data ?? []).replace(/</g, "\\u003c")};</script>
 </head><body>${html}</body></html>`,
-    [html, data],
+    [html, data, dark],
   );
   return (
     <iframe
