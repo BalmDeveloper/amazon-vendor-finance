@@ -95,7 +95,7 @@ export default function DashboardPage() {
                 <Trash2 /> Delete
               </Button>
             )}
-            <Link href="/?q=Build%20a%20sales%20pipeline%20dashboard" className={buttonVariants({ size: "sm" })}>
+            <Link href="/assistant?q=Build%20a%20dashboard%20for%20shortage%20recovery%20and%20deductions" className={buttonVariants({ size: "sm" })}>
               <Sparkles /> New dashboard
             </Link>
           </div>
@@ -131,7 +131,7 @@ export default function DashboardPage() {
               <LayoutDashboard className="mx-auto size-8 text-muted-foreground" />
               <p className="mt-3 font-medium">This dashboard is empty</p>
               <p className="text-sm text-muted-foreground">Ask Claude to build one, or pin charts from a conversation.</p>
-              <Link href="/?q=Build%20a%20sales%20pipeline%20dashboard" className={`${buttonVariants({ size: "sm" })} mt-4`}>
+              <Link href="/assistant?q=Build%20a%20dashboard%20for%20shortage%20recovery%20and%20deductions" className={`${buttonVariants({ size: "sm" })} mt-4`}>
                 <Sparkles /> Build with Claude
               </Link>
             </CardContent>

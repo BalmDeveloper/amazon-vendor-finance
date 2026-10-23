@@ -1,85 +1,37 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import {
-  AlertTriangle, ArrowUpRight, Banknote, Check, FileQuestion, Lightbulb, MessageSquare, PackageX, X,
-} from "lucide-react";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { AlertTriangle, Lightbulb, MessageSquare } from "lucide-react";
+import { AREA } from "@/lib/areas";
+import { DecisionBar } from "@/components/DecisionBar";
+import { RecommendationList } from "@/components/RecommendationList";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SAMPLE_INSIGHTS, SAMPLE_RECOMMENDATIONS } from "@/lib/sample";
-import type { Insight, Recommendation } from "@/lib/types";
+import { humanize, usd } from "@/lib/format";
+import { useOps } from "@/lib/ops-store";
+import type { Insight } from "@/lib/types";
 
-const AREA: Record<string, { label: string; icon: typeof Lightbulb }> = {
-  shortage_recovery: { label: "Shortage recovery", icon: PackageX },
-  unexplained_deductions: { label: "Unexplained deductions", icon: FileQuestion },
-  cash_collection: { label: "Cash collection", icon: Banknote },
-};
 const SEVERITY: Record<Insight["severity"], string> = {
   high: "bg-danger-soft text-destructive border-destructive/30",
   medium: "bg-warning-soft text-warning border-warning/30",
   low: "bg-muted text-muted-foreground",
 };
 
-const usd = (v: number) => `$${Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(v)}`;
 const metricValue = (i: Insight, v: number | null) =>
   v == null ? "–" : /\$/.test(i.metric) ? usd(v) : /rate|%/i.test(i.metric) ? `${v}%` : Intl.NumberFormat("en-US").format(v);
-const pretty = (s: string) => s.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 
 export default function InsightsPage() {
-  const router = useRouter();
-  const [insights, setInsights] = useState<Insight[] | null>(null);
-  const [recs, setRecs] = useState<Recommendation[] | null>(null);
-  const [sample, setSample] = useState(false);
+  const { ready, sample, insights, recommendations: recs } = useOps();
   const [area, setArea] = useState("all");
-  const [dismissing, setDismissing] = useState<Recommendation | null>(null);
-
-  useEffect(() => {
-    Promise.all([fetch("/api/insights"), fetch("/api/recommendations")])
-      .then(async ([a, b]) => {
-        if (!a.ok || !b.ok) throw new Error();
-        setInsights(await a.json());
-        setRecs(await b.json());
-      })
-      .catch(() => {
-        setSample(true);
-        setInsights(SAMPLE_INSIGHTS);
-        setRecs(SAMPLE_RECOMMENDATIONS);
-      });
-  }, []);
 
   const open = useMemo(
-    () => (recs ?? []).filter((r) => r.status === "new").sort((a, b) => b.estimated_value_usd - a.estimated_value_usd),
+    () => recs.filter((r) => r.status === "new").sort((a, b) => b.estimated_value_usd - a.estimated_value_usd),
     [recs],
   );
   const totalValue = open.reduce((s, r) => s + r.estimated_value_usd, 0);
-  const shown = (insights ?? []).filter((i) => area === "all" || i.problem_area === area);
-  const insightTitle = (id: string | null) => insights?.find((i) => i.id === id)?.title;
-
-  async function respond(rec: Recommendation, action: "accept" | "dismiss", reason?: string) {
-    setRecs((all) => all?.map((r) => (r.id === rec.id ? { ...r, status: action === "accept" ? "accepted" : "dismissed" } : r)) ?? null);
-    if (sample) {
-      toast.success(action === "accept" ? "Accepted (sample mode). In production this creates an action item." : "Dismissed (sample mode)");
-      return;
-    }
-    const r = await fetch(`/api/recommendations/${encodeURIComponent(rec.id)}`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, reason }),
-    });
-    if (!r.ok) {
-      setRecs((all) => all?.map((x) => (x.id === rec.id ? rec : x)) ?? null);
-      toast.error("Couldn't update the recommendation. Try again.");
-      return;
-    }
-    if (action === "accept") {
-      toast.success("Action item created", { action: { label: "View board", onClick: () => router.push("/actions") } });
-    } else {
-      toast("Recommendation dismissed", { description: "Your reason helps tune future recommendations." });
-    }
-  }
+  const shown = insights.filter((i) => area === "all" || i.problem_area === area);
 
   return (
     <div className="h-full overflow-y-auto">
@@ -92,7 +44,7 @@ export default function InsightsPage() {
             </div>
             <p className="text-sm text-muted-foreground">What changed, why it matters, and what to do next.</p>
           </div>
-          <Link href="/?q=Explain%20the%20biggest%20recovery%20opportunity%20right%20now" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Link href="/assistant?q=Explain%20the%20biggest%20recovery%20opportunity%20right%20now" className={buttonVariants({ variant: "outline", size: "sm" })}>
             <MessageSquare /> Ask the assistant
           </Link>
         </div>
@@ -111,13 +63,13 @@ export default function InsightsPage() {
             </Tabs>
           </div>
 
-          {insights === null && [0, 1, 2].map((i) => <div key={i} className="h-36 animate-pulse rounded-xl bg-muted" />)}
-          {insights && shown.length === 0 && (
+          {!ready && [0, 1, 2].map((i) => <div key={i} className="h-36 animate-pulse rounded-xl bg-muted" />)}
+          {ready && shown.length === 0 && (
             <Card className="border-dashed"><CardContent className="py-10 text-center text-sm text-muted-foreground">No insights in this area yet.</CardContent></Card>
           )}
 
           {shown.map((i) => {
-            const A = AREA[i.problem_area] ?? { label: pretty(i.problem_area), icon: Lightbulb };
+            const A = AREA[i.problem_area] ?? { label: humanize(i.problem_area), icon: Lightbulb, playbook: "" };
             return (
               <Card key={i.id}>
                 <CardHeader>
@@ -147,11 +99,17 @@ export default function InsightsPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {i.related_entity && <span className="text-xs text-muted-foreground">{i.related_entity}</span>}
-                    <Link href={`/?q=${encodeURIComponent(`Tell me more about: ${i.title}`)}`} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-                      Explore <ArrowUpRight />
-                    </Link>
+                  {i.related_entity && <span className="text-xs text-muted-foreground">{i.related_entity}</span>}
+                  <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t pt-3">
+                    <DecisionBar
+                      title={i.title}
+                      detail={i.summary}
+                      followUp={`Tell me more about: ${i.title}. What is driving it and what should we do first?`}
+                      actionType={recs.find((r) => r.insight_id === i.id)?.action_type ?? "other"}
+                    />
+                    {A.playbook && (
+                      <Link href={`/playbooks/${A.playbook}`} className={buttonVariants({ size: "xs", variant: "secondary" })}>Run playbook</Link>
+                    )}
                   </div>
                 </CardFooter>
               </Card>
@@ -164,61 +122,19 @@ export default function InsightsPage() {
           <Card size="sm" className="bg-primary text-primary-foreground">
             <CardContent>
               <div id="recs" className="text-sm opacity-80">Recommended actions</div>
-              <div className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{recs ? usd(totalValue) : "–"}</div>
+              <div className="mt-1 text-3xl font-semibold tabular-nums tracking-tight">{ready ? usd(totalValue) : "–"}</div>
               <div className="text-sm opacity-80">estimated value across {open.length} open recommendation{open.length === 1 ? "" : "s"}</div>
             </CardContent>
           </Card>
 
-          {recs === null && [0, 1].map((i) => <div key={i} className="h-40 animate-pulse rounded-xl bg-muted" />)}
-          {recs && open.length === 0 && (
+          {!ready && [0, 1].map((i) => <div key={i} className="h-40 animate-pulse rounded-xl bg-muted" />)}
+          {ready && open.length === 0 && (
             <Card className="border-dashed"><CardContent className="py-8 text-center text-sm text-muted-foreground">You&apos;re all caught up.</CardContent></Card>
           )}
-
-          {open.map((r) => (
-            <Card key={r.id} size="sm">
-              <CardHeader>
-                <CardTitle>{pretty(r.action_type)}</CardTitle>
-                {r.entity_id && <CardDescription>{r.entity_id}</CardDescription>}
-                <CardAction className="text-right">
-                  <div className="text-base font-semibold tabular-nums text-success">{usd(r.estimated_value_usd)}</div>
-                  <div className="text-[11px] text-muted-foreground">est. value</div>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">{r.rationale}</p>
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Confidence</span><span className="tabular-nums">{Math.round(r.confidence * 100)}%</span>
-                  </div>
-                  <div className="h-1.5 rounded-full bg-muted" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(r.confidence * 100)} aria-label="Confidence">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${r.confidence * 100}%` }} />
-                  </div>
-                </div>
-                {(insightTitle(r.insight_id) || r.expires_at) && (
-                  <div className="text-xs text-muted-foreground">
-                    {insightTitle(r.insight_id) && <>From: {insightTitle(r.insight_id)}</>}
-                    {r.expires_at && <> · expires {r.expires_at}</>}
-                  </div>
-                )}
-              </CardContent>
-              <CardFooter className="gap-2 border-t pt-3">
-                <Button size="sm" className="flex-1" onClick={() => respond(r, "accept")}><Check /> Accept</Button>
-                <Button size="sm" variant="outline" className="flex-1" onClick={() => setDismissing(r)}><X /> Dismiss</Button>
-              </CardFooter>
-            </Card>
-          ))}
+          <RecommendationList recs={open} />
         </aside>
       </div>
 
-      <ConfirmDialog
-        open={dismissing !== null}
-        onOpenChange={(o) => !o && setDismissing(null)}
-        title="Dismiss this recommendation?"
-        description="Tell us why. Reasons are kept and used to improve future recommendations."
-        withReason="e.g. Already handled by the 3PL, outside dispute window…"
-        confirmLabel="Dismiss"
-        onConfirm={(reason) => { if (dismissing) respond(dismissing, "dismiss", reason); setDismissing(null); }}
-      />
     </div>
   );
 }

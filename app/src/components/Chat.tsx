@@ -10,10 +10,10 @@ import { chatToolkit } from "./chat/toolkit";
 import { fromStored, useSalesRuntime } from "./chat/use-sales-runtime";
 
 const SUGGESTIONS = [
-  { title: "Pipeline dashboard", label: "KPIs, revenue by rep, win rate", prompt: "Build a sales pipeline dashboard: headline KPIs, deal value by rep, win rate by product line and pending deals." },
-  { title: "Deal value by rep", label: "ranked bar chart", prompt: "What is the total deal value by sales rep? Chart it." },
-  { title: "Pending deals & risks", label: "with follow-up actions", prompt: "Which deals are still pending, and what concerns came up on those calls? Create follow-up action items." },
-  { title: "Tesco promo impact", label: "weekly trend", prompt: "Show the Tesco weekly sales trend for promoted vs non-promoted products." },
+  { title: "What should I act on first?", label: "ranked by recoverable $", prompt: "What are the top 3 things I should act on this week to recover money? Rank by estimated value and create action items." },
+  { title: "Disputable shortages", label: "before the window closes", prompt: "Which shortage claims are still disputable, and how much could we recover? Chart it by month." },
+  { title: "Unexplained deductions", label: "categorize and route", prompt: "Break down unexplained deductions by likely category and suggest who should resolve each." },
+  { title: "Cash collection dashboard", label: "aging, pending, unpaid", prompt: "Build a cash collection dashboard: unpaid invoices by age bucket, pending Amazon action, and the top invoices to chase." },
 ];
 
 function Welcome() {

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useExternalStoreRuntime, type AppendMessage, type ThreadMessageLike } from "@assistant-ui/react";
 import type { AgentEvent, Message } from "@/lib/types";
 
@@ -113,9 +113,24 @@ export function useSalesRuntime(opts: { chatId?: string; onChatId: (id: string) 
     }
   }, [opts]);
 
+  // After an answer, suggest the next step toward a decision rather than more exploration.
+  const followups = useMemo(() => {
+    const last = messages.at(-1);
+    if (isRunning || last?.role !== "assistant") return undefined;
+    const parts = Array.isArray(last.content) ? last.content : [];
+    const has = (tool: string) => parts.some((p) => p.type === "tool-call" && p.toolName === tool);
+    const out: { title: string; prompt: string }[] = [];
+    if (!has(UI_TOOLS.actions)) out.push({ title: "Turn this into action items", prompt: "Turn this into action items with owners, due dates and estimated value." });
+    if (has(UI_TOOLS.chart) && !has(UI_TOOLS.dashboard)) out.push({ title: "Build a dashboard", prompt: "Build a dashboard from this so I can track it weekly." });
+    out.push({ title: "What's driving it?", prompt: "What is driving this? Show the top contributors and the evidence." });
+    out.push({ title: "Summarize for my manager", prompt: "Summarize this in three bullets for my manager: what happened, the $ impact, and the decision needed." });
+    return out;
+  }, [messages, isRunning]);
+
   const runtime = useExternalStoreRuntime<Msg>({
     messages,
     isRunning,
+    suggestions: followups,
     onNew,
     onCancel: async () => abort.current?.abort(),
     convertMessage: (m) => m,

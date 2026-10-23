@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Toolkit, ToolCallMessagePartComponent } from "@assistant-ui/react";
 import { AlertCircle, ArrowUpRight, CheckCircle2, CheckSquare, Database, LayoutDashboard, Loader2, Pin } from "lucide-react";
+import { DecisionBar } from "@/components/DecisionBar";
 import { ChartCard } from "@/components/ChartCard";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -43,9 +44,9 @@ function PinnableChart({ spec }: { spec: ChartSpec }) {
     else toast.error("Couldn't pin this chart");
   }
   return (
+    <div className="my-3 space-y-2">
     <ChartCard
       spec={spec}
-      className="my-3"
       action={
         <Button size="sm" variant="outline" onClick={pin} disabled={state !== "idle"}>
           {state === "saving" ? <Loader2 className="animate-spin" /> : state === "pinned" ? <CheckCircle2 /> : <Pin />}
@@ -53,6 +54,12 @@ function PinnableChart({ spec }: { spec: ChartSpec }) {
         </Button>
       }
     />
+    <DecisionBar
+      title={spec.title ?? "Follow up on this chart"}
+      detail={spec.description}
+      followUp={`About "${spec.title ?? "this chart"}": what is driving it, and what should we do next?`}
+    />
+    </div>
   );
 }
 
