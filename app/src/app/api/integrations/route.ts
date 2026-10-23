@@ -1,6 +1,5 @@
 import { connection } from "next/server";
-import { listMcpTools } from "@/lib/mcp";
-import { query } from "@/lib/snowflake";
+import { sql } from "@/lib/snowflake";
 
 async function check<T>(fn: () => Promise<T>) {
   const t = Date.now();
@@ -12,19 +11,27 @@ async function check<T>(fn: () => Promise<T>) {
   }
 }
 
+// Each check runs as the signed-in user, so the page shows what *you* can reach.
 export async function GET() {
   await connection();
-  const [warehouse, mcp] = await Promise.all([
-    check(() => query("SELECT CURRENT_ROLE() AS ROLE, CURRENT_WAREHOUSE() AS WH")),
-    check(listMcpTools),
+  const [identity, agent, semanticView, search] = await Promise.all([
+    check(async () => (await sql<{ user: string; role: string; warehouse: string }>(
+      "SELECT CURRENT_USER() AS user, CURRENT_ROLE() AS role, CURRENT_WAREHOUSE() AS warehouse",
+    ))[0]),
+    check(async () => {
+      const rows = await sql<{ name: string }>("SHOW AGENTS LIKE 'AMAZON_VENDOR_FINANCE_AGENT' IN SCHEMA AMAZON_FINANCE_APP.APP");
+      if (!rows.length) throw new Error("Agent not found or no USAGE");
+      return { name: "AMAZON_FINANCE_APP.APP.AMAZON_VENDOR_FINANCE_AGENT" };
+    }),
+    check(async () => (await sql<{ total_invoiced: number }>(
+      "SELECT * FROM SEMANTIC_VIEW(AMAZON_FINANCE_APP.SEMANTIC.AMAZON_VENDOR_FINANCE_SV METRICS invoices.total_invoiced)",
+    ))[0]),
+    check(async () => {
+      const [row] = await sql<{ r: string }>(
+        "SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW('AMAZON_FINANCE_APP.OPS.OPS_SEARCH', '{\"query\": \"shortage\", \"columns\": [\"title\"], \"limit\": 1}') AS r",
+      );
+      return { results: (JSON.parse(row.r).results ?? []).length };
+    }),
   ]);
-  return Response.json({
-    snowflake: warehouse,
-    mcp: mcp.ok ? { ms: mcp.ms, ...(mcp.value as object) } : mcp,
-    anthropic: { ok: Boolean(process.env.ANTHROPIC_API_KEY), model: process.env.CLAUDE_MODEL ?? "claude-opus-5-5" },
-    sandbox: {
-      ok: Boolean(process.env.VERCEL_OIDC_TOKEN || process.env.VERCEL_TOKEN),
-      note: "Uses Vercel OIDC on deploy; run `vercel env pull` locally.",
-    },
-  });
+  return Response.json({ identity, agent, semanticView, search });
 }

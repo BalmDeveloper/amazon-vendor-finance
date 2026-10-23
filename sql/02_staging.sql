@@ -178,3 +178,9 @@ SELECT
     "approved_quantity"         AS approved_quantity,
     "comments"                  AS comments
 FROM AMAZON_VENDOR_PL_FINANCE_REMITTANCE_AND_INVOICES_DEMO_DATASET.PUBLIC."payments_dispute_management_details";
+
+-- Cortex Analyst returns SQL over these views; the app re-runs that SQL for dashboard widgets
+-- as the signed-in user, so readers need SELECT here (the same data the semantic view exposes).
+GRANT USAGE ON SCHEMA AMAZON_FINANCE_APP.STAGING TO ROLE AMZ_FIN_USER;
+GRANT SELECT ON ALL VIEWS IN SCHEMA AMAZON_FINANCE_APP.STAGING TO ROLE AMZ_FIN_USER;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA AMAZON_FINANCE_APP.STAGING TO ROLE AMZ_FIN_USER;

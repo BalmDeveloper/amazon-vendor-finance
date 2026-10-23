@@ -8,7 +8,7 @@ import {
 import {
   Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut,
 } from "@/components/ui/command";
-import { humanize, usd } from "@/lib/format";
+import { humanize, isOpenRec, usd } from "@/lib/format";
 import { useOps } from "@/lib/ops-store";
 import { SAMPLE_PLAYBOOKS } from "@/lib/sample";
 
@@ -72,11 +72,11 @@ export function CommandPalette() {
               </CommandItem>
             ))}
           </CommandGroup>
-          {recommendations.some((r) => r.status === "new") && (
+          {recommendations.some(isOpenRec) && (
             <CommandGroup heading="Recommendations">
-              {recommendations.filter((r) => r.status === "new").map((r) => (
-                <CommandItem key={r.id} value={`rec ${r.action_type} ${r.entity_id ?? ""} ${r.rationale}`} onSelect={() => go("/insights")}>
-                  <Lightbulb /> {humanize(r.action_type)}{r.entity_id ? ` · ${r.entity_id}` : ""}
+              {recommendations.filter(isOpenRec).map((r) => (
+                <CommandItem key={r.id} value={`rec ${r.title} ${r.action_type} ${r.rationale ?? ""}`} onSelect={() => go("/insights")}>
+                  <Lightbulb /> <span className="truncate">{r.title}</span>
                   <CommandShortcut>{usd(r.estimated_value_usd)}</CommandShortcut>
                 </CommandItem>
               ))}
@@ -85,7 +85,7 @@ export function CommandPalette() {
           {insights.length > 0 && (
             <CommandGroup heading="Insights">
               {insights.map((i) => (
-                <CommandItem key={i.id} value={`insight ${i.title} ${i.summary}`} onSelect={() => go("/insights")}><Lightbulb /> {i.title}</CommandItem>
+                <CommandItem key={i.id} value={`insight ${i.title} ${i.summary ?? ""}`} onSelect={() => go("/insights")}><Lightbulb /> {i.title}</CommandItem>
               ))}
             </CommandGroup>
           )}

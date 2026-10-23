@@ -1,0 +1,107 @@
+-- 06_app_tables.sql: chat history for the app.
+-- Users read only their own chats through secure views; writes go through owner's-rights procedures.
+-- The app runs these with caller's rights, so CURRENT_USER() is the signed-in user.
+-- Run as AMZ_FIN_ADMIN. Safe to re-run.
+
+USE ROLE AMZ_FIN_ADMIN;
+USE WAREHOUSE AMZ_FIN_WH;
+USE SCHEMA AMAZON_FINANCE_APP.APP;
+
+CREATE TABLE IF NOT EXISTS CHATS (
+    chat_id     VARCHAR       NOT NULL PRIMARY KEY,
+    title       VARCHAR       NOT NULL,
+    created_by  VARCHAR       NOT NULL,
+    created_at  TIMESTAMP_LTZ NOT NULL DEFAULT CURRENT_TIMESTAMP(),
+    updated_at  TIMESTAMP_LTZ NOT NULL DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE TABLE IF NOT EXISTS MESSAGES (
+    message_id  VARCHAR       NOT NULL PRIMARY KEY,
+    chat_id     VARCHAR       NOT NULL,
+    role        VARCHAR       NOT NULL COMMENT 'user | assistant',
+    content     VARCHAR,
+    events      VARIANT       COMMENT 'Tool calls, charts, dashboards and action items shown with the answer',
+    created_by  VARCHAR       NOT NULL,
+    created_at  TIMESTAMP_LTZ NOT NULL DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE SEQUENCE IF NOT EXISTS APP_ID_SEQ;
+
+CREATE OR REPLACE SECURE VIEW MY_CHATS AS
+    SELECT chat_id, title, created_at, updated_at FROM CHATS WHERE created_by = CURRENT_USER();
+
+CREATE OR REPLACE SECURE VIEW MY_MESSAGES AS
+    SELECT m.message_id, m.chat_id, m.role, m.content, m.events, m.created_at
+      FROM MESSAGES m JOIN CHATS c ON c.chat_id = m.chat_id
+     WHERE c.created_by = CURRENT_USER();
+
+CREATE OR REPLACE PROCEDURE CREATE_CHAT(TITLE VARCHAR)
+RETURNS VARIANT
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS
+$$
+DECLARE
+    new_id VARCHAR;
+BEGIN
+    SELECT 'CHT-' || AMAZON_FINANCE_APP.APP.APP_ID_SEQ.NEXTVAL INTO :new_id;
+    INSERT INTO AMAZON_FINANCE_APP.APP.CHATS (chat_id, title, created_by)
+    SELECT :new_id, LEFT(COALESCE(NULLIF(TRIM(:TITLE), ''), 'New conversation'), 80), CURRENT_USER();
+    RETURN OBJECT_CONSTRUCT('ok', TRUE, 'chat_id', new_id);
+END;
+$$;
+
+-- EVENTS_JSON is a JSON array string (or NULL).
+CREATE OR REPLACE PROCEDURE SAVE_MESSAGE(CHAT_ID VARCHAR, ROLE VARCHAR, CONTENT VARCHAR, EVENTS_JSON VARCHAR)
+RETURNS VARIANT
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS
+$$
+DECLARE
+    new_id VARCHAR;
+    owned NUMBER;
+BEGIN
+    IF (:ROLE NOT IN ('user', 'assistant')) THEN
+        RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'role must be user or assistant');
+    END IF;
+    SELECT COUNT(*) INTO :owned FROM AMAZON_FINANCE_APP.APP.CHATS
+     WHERE chat_id = :CHAT_ID AND created_by = CURRENT_USER();
+    IF (owned = 0) THEN
+        RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Chat not found');
+    END IF;
+    SELECT 'MSG-' || AMAZON_FINANCE_APP.APP.APP_ID_SEQ.NEXTVAL INTO :new_id;
+    INSERT INTO AMAZON_FINANCE_APP.APP.MESSAGES (message_id, chat_id, role, content, events, created_by)
+    SELECT :new_id, :CHAT_ID, :ROLE, :CONTENT, TRY_PARSE_JSON(:EVENTS_JSON), CURRENT_USER();
+    UPDATE AMAZON_FINANCE_APP.APP.CHATS SET updated_at = CURRENT_TIMESTAMP() WHERE chat_id = :CHAT_ID;
+    RETURN OBJECT_CONSTRUCT('ok', TRUE, 'message_id', new_id);
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE DELETE_CHAT(CHAT_ID VARCHAR)
+RETURNS VARIANT
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS
+$$
+DECLARE
+    owned NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO :owned FROM AMAZON_FINANCE_APP.APP.CHATS
+     WHERE chat_id = :CHAT_ID AND created_by = CURRENT_USER();
+    IF (owned = 0) THEN
+        RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Chat not found');
+    END IF;
+    DELETE FROM AMAZON_FINANCE_APP.APP.MESSAGES WHERE chat_id = :CHAT_ID;
+    DELETE FROM AMAZON_FINANCE_APP.APP.CHATS WHERE chat_id = :CHAT_ID;
+    RETURN OBJECT_CONSTRUCT('ok', TRUE, 'chat_id', :CHAT_ID);
+END;
+$$;
+
+GRANT USAGE ON SCHEMA AMAZON_FINANCE_APP.APP TO ROLE AMZ_FIN_USER;
+GRANT USAGE ON SCHEMA AMAZON_FINANCE_APP.APP TO ROLE AMZ_FIN_APP;
+GRANT SELECT ON VIEW MY_CHATS    TO ROLE AMZ_FIN_USER;
+GRANT SELECT ON VIEW MY_MESSAGES TO ROLE AMZ_FIN_USER;
+GRANT USAGE ON PROCEDURE CREATE_CHAT(VARCHAR)                           TO ROLE AMZ_FIN_USER;
+GRANT USAGE ON PROCEDURE SAVE_MESSAGE(VARCHAR, VARCHAR, VARCHAR, VARCHAR) TO ROLE AMZ_FIN_USER;
+GRANT USAGE ON PROCEDURE DELETE_CHAT(VARCHAR)                           TO ROLE AMZ_FIN_USER;

@@ -34,6 +34,7 @@ Figures come from the demo data (July 2021 – April 2025) and were checked with
 - **Repeated claim amounts:** a deduction claim applied across several payments repeats its **full** amount on each remittance line, while `amount_paid` splits it. Never sum `invoice_amount` over remittance lines. Use `STAGING.STG_DEDUCTION_CLAIMS` (one row per claim, with `claim_amount` counted once and `deducted_amount` as the cash actually taken).
 - **Shortage claims link to invoices:** a shortage claim number is `<invoice_number>-<n>SC` (1,571 of 1,583 lines match an invoice). `STG_REMITTANCE_LINES.base_invoice_number` holds the extracted invoice number.
 - **Disputes barely link to claims:** only 76 of 721 disputed invoice numbers match a shortage claim's invoice, and 204 match an invoice at all. Measure recovery from the dispute table directly; treat claim-level "disputed or not" as approximate.
+- **Search ("indexing") decisions:** Cortex Search needs change tracking on its sources, so it can't index the provider's shared tables directly, and it bills for serving per GB indexed. Product titles are anonymized in the demo data ("Product 7f677c30d7c4") and co-op agreements have only 8 values, so per-dimension search services aren't worth their cost yet. Add them on `PRODUCT_TITLE` and `AGREEMENT_TITLE` once real data arrives. The one service built now is `OPS.OPS_SEARCH`, over the platform's own text (dashboards, insights, recommendations), so the agent can reuse existing dashboards instead of creating duplicates.
 - **Unlabeled deductions are co-op:** unlabeled lines carry no text and no reference number, only an amount, a date and a payment. They are grouped into claims by date + amount, then matched one-to-one to `payments_coop` on exact amount within −30/+5 days (`STAGING.STG_COOP_DEDUCTION_MATCH`). `STG_DEDUCTION_CLAIMS` exposes `source_category`, the resolved `category` and `category_method` (Amazon label / Matched to co-op invoice / Unresolved), so every category is auditable. AI classification was not used because there is no text to classify.
 
 ## The five layers: what we build in each
@@ -54,11 +55,14 @@ The platform team keeps these names and shapes stable. Anything not listed here 
 |---|---|---|
 | `AMAZON_FINANCE_APP.MARTS.*` (tables listed in Phase 2) | Dashboards and headline numbers | Query with fixed, parameterized SQL; the LLM is never in the dashboard path. |
 | `AMAZON_FINANCE_APP.APP.AMAZON_VENDOR_FINANCE_AGENT` | Chat | Use the Cortex Agents REST API (agent:run) and stream its events: text, tables, charts, tool results. Run as the signed-in user. |
-| `AMAZON_FINANCE_APP.MARTS.INSIGHTS` | The insights feed | One row per insight: id, generated_at, problem_area, severity, title, summary, metric, current_value, comparison_value, change_pct, evidence_sql, related entity. |
-| `AMAZON_FINANCE_APP.MARTS.RECOMMENDED_ACTIONS` | The recommended actions list | One row per recommendation: id, insight_id, action_type, entity type and id, estimated_value_usd, confidence, rationale, status (new, accepted, dismissed), expires_at. Sorted by estimated value. |
-| `OPS.ACCEPT_RECOMMENDATION(id)`, `OPS.DISMISS_RECOMMENDATION(id, reason)` | Responding to recommendations | Accepting creates an `ACTION_ITEMS` row linked by `recommendation_id`. Dismiss reasons are kept and used to tune the rules. |
-| `AMAZON_FINANCE_APP.OPS.ACTION_ITEMS_V` | Reading the action-item board | View filtered by role. |
-| `OPS.CREATE_ACTION_ITEM(...)`, `OPS.UPDATE_ACTION_ITEM(...)` | Action-item writes | The only way to change action items. Signatures are documented in `sql/` when created. |
+| `AMAZON_FINANCE_APP.OPS.DASHBOARDS`, `OPS.DASHBOARD_WIDGETS` | Agent- and user-built dashboards | **Built (sql/04).** A dashboard is a definition: each widget stores `widget_type` (kpi, line, bar, area, pie, table), title, description, `query_sql`, `chart_config` and `layout`. The app runs each widget's query **as the signed-in user** and renders it, so numbers are always live and access rules apply. Show `status = 'published'` by default; drafts are visible to their creator. |
+| `AMAZON_FINANCE_APP.OPS.INSIGHTS` | The insights feed | **Built (sql/04).** One row per insight: id, generated_at, business_problem, severity, title, summary, metric_name, current_value, comparison_value, change_pct, period, entity, evidence_sql, linked dashboard/widget, status. |
+| `AMAZON_FINANCE_APP.OPS.RECOMMENDED_ACTIONS` | The recommended actions list | **Built (sql/04).** One row per recommendation: id, insight_id, action_type, title, rationale, entity, estimated_value_usd, confidence, status (new, accepted, dismissed, expired), expires_at. Sort by estimated value. |
+| `AMAZON_FINANCE_APP.OPS.ACTION_ITEMS` | The action-item board | **Built (sql/04).** Status, owner, priority, due date, amount, outcome amount (recovered), source, links to recommendation and insight. |
+| `OPS.CREATE_DASHBOARD`, `OPS.ADD_WIDGET`, `OPS.SET_DASHBOARD_STATUS` | Dashboard writes | **Built (sql/05).** `ADD_WIDGET` rejects anything but a single compiling `SELECT`/`WITH`. Agent-built dashboards start as `draft`; a person publishes them. |
+| `OPS.CREATE_ACTION_ITEM`, `OPS.UPDATE_ACTION_ITEM` | Action-item writes | **Built (sql/05).** Return `{"ok": true/false, ...}`; on false, show `error`. |
+| `OPS.ACCEPT_RECOMMENDATION(id, owner)`, `OPS.DISMISS_RECOMMENDATION(id, reason)` | Responding to recommendations | **Built (sql/05).** Accepting creates a linked action item. Dismissing requires a reason, which is kept for rule tuning. |
+| `AMAZON_FINANCE_APP.OPS.OPS_SEARCH` | Search over dashboards, insights and recommendations | **Built (sql/04).** Cortex Search service; filter with `doc_type` (dashboard, insight, recommendation), `business_problem` or `status`. Useful for a global search box in the app. |
 | Role `AMZ_FIN_APP` | The app's service role | Has only what the interface needs. |
 | Warehouse `AMZ_FIN_WH` (XS) | Dashboard and app queries | Short auto-suspend. |
 
@@ -106,10 +110,10 @@ The platform team keeps these names and shapes stable. Anything not listed here 
 
 **Phase 4: Action items written to Snowflake (Action). Owner: platform.**
 10. Create `OPS.ACTION_ITEMS` with these columns: id, type (dispute_shortage, resolve_deduction, chase_payment, coop_review, price_fix), entity type and id (invoice, ASIN or PO), amount, priority, owner, status (open, in_progress, done, dismissed), due date, created_by, created_at, source (agent, user or alert), notes and outcome amount (what was recovered).
-11. Write procedures that validate input, record `CURRENT_USER()`, and change nothing but `ACTION_ITEMS`. Add the view `ACTION_ITEMS_V`, filtered by role.
+11. Write procedures that validate input, record `CURRENT_USER()`, and change nothing but `ACTION_ITEMS`. Users read `ACTION_ITEMS` directly (SELECT only); all writes go through procedures.
 
 **Phase 4b: Insights and recommended actions (Action and Intelligence). Owner: platform.**
-11a. **Detection is rules in SQL, not the LLM.** A daily task runs SQL checks over `MARTS` and writes to `MARTS.INSIGHTS`. Initial checks:
+11a. **Detection is rules in SQL, not the LLM.** A daily task runs SQL checks over `MARTS` and writes to `OPS.INSIGHTS`. Initial checks:
    - shortage deducted this month vs the 6-month average (spike detection);
    - shortages approaching the end of the dispute window that haven't been disputed;
    - recovery rate trend;
@@ -119,7 +123,7 @@ The platform team keeps these names and shapes stable. Anything not listed here 
    - co-op spend vs sales by agreement;
    - price-variance invoices clustered by product.
 11b. **Wording is written by AI, numbers are not.** `AI_COMPLETE` writes each insight's title and two-sentence summary using only the numbers the rule computed. Its prompt forbids new figures, and the rule's own metric columns are stored alongside the text, so the app can show the exact numbers.
-11c. **Recommendations come from the rules too.** Each insight rule maps to one or more recommended actions (e.g. "Dispute 37 shortages on 12 POs before their window closes, est. $48K"). Each one stores an estimated value calculated in SQL, a confidence level, and a link back to the insight. They're written to `MARTS.RECOMMENDED_ACTIONS` with an expiry, and expired or already-handled ones are removed when the next run finds them stale.
+11c. **Recommendations come from the rules too.** Each insight rule maps to one or more recommended actions (e.g. "Dispute 37 shortages on 12 POs before their window closes, est. $48K"). Each one stores an estimated value calculated in SQL, a confidence level, and a link back to the insight. They're written to `OPS.RECOMMENDED_ACTIONS` with an expiry, and expired or already-handled ones are removed when the next run finds them stale.
 11d. Create the procedures `ACCEPT_RECOMMENDATION` and `DISMISS_RECOMMENDATION`. Add the agent tools `LIST_INSIGHTS` and `LIST_RECOMMENDATIONS`, so chat can answer "what should I do this week?" and explain any insight using its stored evidence.
 11e. **Feedback loop:** track the acceptance rate and the recovered amount for each rule (from the action item's outcome amount). Retune or retire rules that keep getting dismissed.
 
@@ -138,8 +142,8 @@ The platform team keeps these names and shapes stable. Anything not listed here 
 **Phase 6: Next.js app (Surface). Owner: teammate.**
 15. Build a Snowflake App in Next.js with TypeScript, using only the **App interface** objects. Suggested pages:
     - **Overview:** headline numbers (invoiced, paid, unpaid, total deductions, shortage recovery rate, share of deductions categorized) plus trend charts, the top 3 insights, and the top recommended actions by estimated value.
-    - **Insights:** a feed from `MARTS.INSIGHTS`, filterable by problem area and severity. Each card shows the summary, the metric and its comparison, and a small chart, with "Ask the agent" to dig deeper in chat.
-    - **Recommended Actions:** a list from `MARTS.RECOMMENDED_ACTIONS`, sorted by estimated value, with Accept and Dismiss buttons that call the procedures. Show the total estimated value still open.
+    - **Insights:** a feed from `OPS.INSIGHTS`, filterable by problem area and severity. Each card shows the summary, the metric and its comparison, and a small chart, with "Ask the agent" to dig deeper in chat.
+    - **Recommended Actions:** a list from `OPS.RECOMMENDED_ACTIONS`, sorted by estimated value, with Accept and Dismiss buttons that call the procedures. Show the total estimated value still open.
     - **Analytics:** pages for exploring the data with filters for date, category, ASIN and PO, all querying `MARTS`:
       - **Shortage Recovery:** disputable shortages, oldest first, with a "Create dispute action" button.
       - **Deductions:** by category, drilling down to lines, with the uncategorized lines highlighted.

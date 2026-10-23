@@ -48,8 +48,8 @@ export function PlaybookRun({ id }: { id: string }) {
     if (!pb) return;
     setBusy(true);
     const ok = await createItems(rows.map((r) => ({
-      title: `${humanize(pb.action_type)}: ${r.label}`, detail: `${pb.title} playbook · ${r.detail} · ${usd(r.value_usd, false)}`,
-      owner, due_date: due || null, priority: r.value_usd >= 30_000 ? "high" : "medium", action_type: pb.action_type, source: "playbook",
+      title: `${humanize(pb.action_type)}: ${r.label}`, notes: `${pb.title} playbook · ${r.detail} · ${usd(r.value_usd, false)}`,
+      owner, due_date: due || null, amount_usd: r.value_usd, priority: r.value_usd >= 30_000 ? "high" : "medium", action_type: pb.action_type, source: "playbook",
     })));
     setBusy(false);
     if (ok) {

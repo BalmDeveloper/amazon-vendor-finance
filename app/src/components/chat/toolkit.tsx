@@ -1,69 +1,130 @@
 "use client";
 import { useState } from "react";
-import { toast } from "sonner";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import type { Toolkit, ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { AlertCircle, ArrowUpRight, CheckCircle2, CheckSquare, Database, LayoutDashboard, Loader2, Pin } from "lucide-react";
-import { DecisionBar } from "@/components/DecisionBar";
+import { AlertCircle, ArrowUpRight, CheckCircle2, CheckSquare, Database, LayoutDashboard, Loader2, Plus, Search } from "lucide-react";
+import { toast } from "sonner";
 import { ChartCard } from "@/components/ChartCard";
+import { DecisionBar } from "@/components/DecisionBar";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ActionItem, AgentEvent, ChartSpec } from "@/lib/types";
-import { UI_TOOLS } from "./use-sales-runtime";
+import type { ActionItem, AgentEvent, ChartSpec, Dashboard } from "@/lib/types";
+import { UI_TOOLS } from "./use-finance-runtime";
 
-const SnowflakeQuery: ToolCallMessagePartComponent = ({ args, result }) => {
-  const q = String((args as Record<string, unknown>)?.message ?? (args as Record<string, unknown>)?.query ?? (args as Record<string, unknown>)?.question ?? "");
+const TOOL_LABEL: Record<string, { label: string; icon: typeof Database }> = {
+  FinanceAnalyst: { label: "Cortex Analyst · finance model", icon: Database },
+  PlatformSearch: { label: "Cortex Search · saved dashboards & insights", icon: Search },
+  SaveDashboard: { label: "Saving dashboard", icon: LayoutDashboard },
+  CreateActionItem: { label: "Adding action item", icon: CheckSquare },
+};
+
+const AgentTool: ToolCallMessagePartComponent = ({ toolName, args, result }) => {
+  const meta = TOOL_LABEL[toolName] ?? { label: toolName, icon: Database };
+  const a = (args ?? {}) as Record<string, unknown>;
+  const detail = String(a.query ?? a.title ?? a.message ?? "");
   return (
     <div className="my-1.5 flex items-start gap-2.5 rounded-lg border bg-muted/30 px-3 py-2 text-sm">
       <div className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md bg-info-soft text-info">
-        <Database className="size-3.5" />
+        <meta.icon className="size-3.5" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 font-medium">
-          Snowflake Cortex Agent
+          {meta.label}
           {result ? <CheckCircle2 className="size-3.5 text-success" /> : <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
         </div>
-        {q && <div className="truncate text-muted-foreground">{q}</div>}
+        {detail && <div className="truncate text-muted-foreground">{detail}</div>}
       </div>
     </div>
   );
 };
 
-const Quiet: ToolCallMessagePartComponent = () => null;
+/** Chart types a stored widget supports, and how a chat chart maps to a widget's chart_config. */
+function widgetFrom(spec: ChartSpec) {
+  const type = spec.type === "html" ? "table" : spec.type;
+  const format = spec.unit === "USD" ? "usd" : spec.unit === "%" ? "percent" : "number";
+  return { type, title: spec.title, description: spec.description, sql: spec.sql!, config: { x: spec.xKey, y: spec.yKeys, format, span: spec.type === "table" ? 3 : 2, variant: spec.variant } };
+}
 
-function PinnableChart({ spec }: { spec: ChartSpec }) {
-  const router = useRouter();
-  const [state, setState] = useState<"idle" | "saving" | "pinned">("idle");
-  async function pin() {
-    setState("saving");
-    const r = await fetch("/api/dashboards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ spec }) });
-    setState(r.ok ? "pinned" : "idle");
-    if (r.ok) toast.success("Pinned to dashboard", { action: { label: "Open", onClick: () => router.push("/dashboard") } });
-    else toast.error("Couldn't pin this chart");
+function SaveToDashboard({ spec }: { spec: ChartSpec }) {
+  const [open, setOpen] = useState(false);
+  const [drafts, setDrafts] = useState<Dashboard[] | null>(null);
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [error, setError] = useState("");
+  const [savedTo, setSavedTo] = useState<string>();
+
+  async function toggle() {
+    setOpen((o) => !o);
+    if (!drafts) {
+      const r = await fetch("/api/dashboards");
+      const list: Dashboard[] = r.ok ? await r.json() : [];
+      setDrafts(list.filter((d) => d.mine && d.status === "draft"));
+    }
   }
+
+  async function save(dashboardId?: string) {
+    setState("saving");
+    setOpen(false);
+    const r = await fetch("/api/dashboards/widgets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dashboardId, widget: widgetFrom(spec) }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (r.ok) {
+      setSavedTo(body.dashboardId);
+      setState("saved");
+      toast.success(dashboardId ? "Added to dashboard" : "Saved as a new draft dashboard", { description: "The query is saved, so the numbers stay live." });
+    } else {
+      setError(body.error ?? "Could not save");
+      setState("error");
+      toast.error("Couldn't save to dashboard", { description: body.error });
+    }
+  }
+
+  if (state === "saved")
+    return (
+      <Link href={`/dashboard?d=${encodeURIComponent(savedTo ?? "")}`} className={buttonVariants({ size: "sm", variant: "outline" })}>
+        <CheckCircle2 /> Saved · open
+      </Link>
+    );
   return (
-    <div className="my-3 space-y-2">
-    <ChartCard
-      spec={spec}
-      action={
-        <Button size="sm" variant="outline" onClick={pin} disabled={state !== "idle"}>
-          {state === "saving" ? <Loader2 className="animate-spin" /> : state === "pinned" ? <CheckCircle2 /> : <Pin />}
-          {state === "pinned" ? "Pinned" : "Pin"}
-        </Button>
-      }
-    />
-    <DecisionBar
-      title={spec.title ?? "Follow up on this chart"}
-      detail={spec.description}
-      followUp={`About "${spec.title ?? "this chart"}": what is driving it, and what should we do next?`}
-    />
+    <div className="relative">
+      <Button size="sm" variant="outline" onClick={toggle} disabled={state === "saving"} title={state === "error" ? error : undefined}>
+        {state === "saving" ? <Loader2 className="animate-spin" /> : state === "error" ? <AlertCircle className="text-destructive" /> : <Plus />}
+        Save to dashboard
+      </Button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-64 rounded-lg border bg-popover p-1 text-sm shadow-md">
+          <button className="w-full rounded-md px-2 py-1.5 text-left hover:bg-muted" onClick={() => save()}>
+            New dashboard: “{spec.title}”
+          </button>
+          {drafts === null && <div className="px-2 py-1.5 text-muted-foreground">Loading drafts…</div>}
+          {drafts?.map((d) => (
+            <button key={d.id} className="w-full truncate rounded-md px-2 py-1.5 text-left hover:bg-muted" onClick={() => save(d.id)}>
+              {d.title}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-const ChartUI: ToolCallMessagePartComponent = ({ result }) => (result ? <PinnableChart spec={result as ChartSpec} /> : null);
+const ChartUI: ToolCallMessagePartComponent = ({ result }) => {
+  const spec = result as ChartSpec | undefined;
+  if (!spec) return null;
+  return (
+    <div className="my-3 space-y-2">
+      <ChartCard spec={spec} action={spec.sql ? <SaveToDashboard spec={spec} /> : undefined} />
+      <DecisionBar
+        title={spec.title}
+        detail={spec.description}
+        followUp={`About "${spec.title}": what is driving it, and what should we do next?`}
+      />
+    </div>
+  );
+};
 
 const DashboardUI: ToolCallMessagePartComponent = ({ result }) => {
   const d = result as Extract<AgentEvent, { type: "dashboard" }> | undefined;
@@ -107,8 +168,10 @@ const ActionsUI: ToolCallMessagePartComponent = ({ result }) => {
               <div className="mt-1 size-3.5 shrink-0 rounded border" />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">{a.title}</div>
-                {(a.owner || a.due_date) && (
-                  <div className="text-xs text-muted-foreground">{[a.owner, a.due_date && `due ${a.due_date}`].filter(Boolean).join(" · ")}</div>
+                {(a.owner || a.due_date || a.amount_usd) && (
+                  <div className="text-xs text-muted-foreground">
+                    {[a.amount_usd ? `$${Math.round(a.amount_usd).toLocaleString("en-US")} at stake` : null, a.owner, a.due_date && `due ${a.due_date}`].filter(Boolean).join(" · ")}
+                  </div>
                 )}
               </div>
               <Badge variant="outline" className={PRIORITY[a.priority ?? "medium"]}>{a.priority ?? "medium"}</Badge>
@@ -129,9 +192,7 @@ const ErrorUI: ToolCallMessagePartComponent = ({ result }) => (
 
 /** UI-only renderers: these tools run on the backend; we only draw their results. */
 export const chatToolkit: Toolkit = {
-  mcp__snowflake__sales_intelligence_agent: { type: "backend", render: SnowflakeQuery },
-  Skill: { type: "backend", render: Quiet },
-  Read: { type: "backend", render: Quiet },
+  ...Object.fromEntries(Object.keys(TOOL_LABEL).map((name) => [name, { type: "backend" as const, render: AgentTool }])),
   [UI_TOOLS.chart]: { type: "backend", render: ChartUI },
   [UI_TOOLS.dashboard]: { type: "backend", render: DashboardUI },
   [UI_TOOLS.actions]: { type: "backend", render: ActionsUI },

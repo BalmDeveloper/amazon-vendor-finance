@@ -18,7 +18,7 @@ export default function PlaybooksPage() {
       </header>
       <div className="mx-auto grid max-w-7xl gap-4 px-4 py-6 sm:px-8 md:grid-cols-3">
         {SAMPLE_PLAYBOOKS.map((p) => {
-          const A = AREA[p.problem_area];
+          const A = AREA[p.business_problem];
           return (
             <Card key={p.id} className="flex flex-col">
               <CardHeader>

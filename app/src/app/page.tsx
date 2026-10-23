@@ -9,8 +9,8 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { AREA } from "@/lib/areas";
-import { isOverdue, usd } from "@/lib/format";
+import { AREA, AREA_OF_ACTION } from "@/lib/areas";
+import { isOpenRec, isOverdue, usd } from "@/lib/format";
 import { useOps } from "@/lib/ops-store";
 import { SAMPLE_PLAYBOOKS } from "@/lib/sample";
 
@@ -42,14 +42,13 @@ export default function TodayPage() {
   const hello = useSyncExternalStore(noop, greeting, () => "Welcome back");
 
   const open = useMemo(
-    () => recommendations.filter((r) => r.status === "new").sort((a, b) => b.estimated_value_usd - a.estimated_value_usd),
+    () => recommendations.filter(isOpenRec).sort((a, b) => (b.estimated_value_usd ?? 0) - (a.estimated_value_usd ?? 0)),
     [recommendations],
   );
-  const atStake = open.reduce((s, r) => s + r.estimated_value_usd, 0);
+  const atStake = open.reduce((s, r) => s + (r.estimated_value_usd ?? 0), 0);
   const byArea = useMemo(() => {
-    const areaOf: Record<string, string> = { dispute_shortage: "shortage_recovery", fix_root_cause: "shortage_recovery", classify_deductions: "unexplained_deductions", resolve_deduction: "unexplained_deductions", chase_payment: "cash_collection" };
     const m = new Map<string, number>();
-    for (const r of open) { const k = areaOf[r.action_type] ?? "other"; m.set(k, (m.get(k) ?? 0) + r.estimated_value_usd); }
+    for (const r of open) { const k = AREA_OF_ACTION[r.action_type] ?? "other"; m.set(k, (m.get(k) ?? 0) + (r.estimated_value_usd ?? 0)); }
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [open]);
 
@@ -185,7 +184,7 @@ export default function TodayPage() {
               </CardHeader>
               <CardContent className="space-y-1.5">
                 {SAMPLE_PLAYBOOKS.map((p) => {
-                  const A = AREA[p.problem_area];
+                  const A = AREA[p.business_problem];
                   return (
                     <Link key={p.id} href={`/playbooks/${p.id}`}
                       className="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring outline-none">

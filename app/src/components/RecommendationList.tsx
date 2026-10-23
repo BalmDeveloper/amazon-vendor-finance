@@ -10,11 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CONFIDENCE_PCT, humanize, usd } from "@/lib/format";
+import { confidenceLevel, humanize, usd } from "@/lib/format";
 import { useOps } from "@/lib/ops-store";
 import type { Recommendation } from "@/lib/types";
 
-const CONF_TONE: Record<Recommendation["confidence"], string> = {
+const CONF_TONE: Record<"high" | "medium" | "low", string> = {
   high: "bg-success-soft text-success border-success/30",
   medium: "bg-info-soft text-info border-info/30",
   low: "bg-muted text-muted-foreground",
@@ -22,7 +22,7 @@ const CONF_TONE: Record<Recommendation["confidence"], string> = {
 
 export const askWhy = (r: Recommendation, insightTitle?: string) =>
   `/assistant?q=${encodeURIComponent(
-    `Why do you recommend "${humanize(r.action_type)}" for ${r.entity_id ?? "this"}? Show the evidence${insightTitle ? ` behind "${insightTitle}"` : ""} and the estimated ${usd(r.estimated_value_usd)} value.`,
+    `Why do you recommend "${r.title}"? Show the evidence${insightTitle ? ` behind "${insightTitle}"` : ""} and how the estimated ${usd(r.estimated_value_usd)} value is computed.`,
   )}`;
 
 /** Recommendations with one-click accept (owner + due date), dismiss with reason, ask-why, and bulk actions. */
@@ -33,10 +33,10 @@ export function RecommendationList({ recs, compact = false }: { recs: Recommenda
   const [accepting, setAccepting] = useState<Recommendation[] | null>(null);
   const [dismissing, setDismissing] = useState<Recommendation[] | null>(null);
 
-  const insightTitle = (id: string | null) => insights.find((i) => i.id === id)?.title;
+  const insightTitle = (id?: string | null) => insights.find((i) => i.id === id)?.title;
   const picked = recs.filter((r) => selected.has(r.id));
   const toggle = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const sum = (list: Recommendation[]) => list.reduce((s, r) => s + r.estimated_value_usd, 0);
+  const sum = (list: Recommendation[]) => list.reduce((s, r) => s + (r.estimated_value_usd ?? 0), 0);
 
   return (
     <div className="space-y-3">
@@ -65,14 +65,15 @@ export function RecommendationList({ recs, compact = false }: { recs: Recommenda
 
       {recs.map((r) => {
         const from = insightTitle(r.insight_id);
+        const level = confidenceLevel(r.confidence);
         return (
           <Card key={r.id} size="sm" className={selected.has(r.id) ? "ring-2 ring-primary/40" : undefined}>
             <CardHeader>
               <div className="flex items-start gap-2.5">
-                {recs.length > 1 && <Checkbox className="mt-0.5" aria-label={`Select ${humanize(r.action_type)}`} checked={selected.has(r.id)} onCheckedChange={() => toggle(r.id)} />}
+                {recs.length > 1 && <Checkbox className="mt-0.5" aria-label={`Select ${r.title}`} checked={selected.has(r.id)} onCheckedChange={() => toggle(r.id)} />}
                 <div className="min-w-0 space-y-1">
-                  <CardTitle>{humanize(r.action_type)}</CardTitle>
-                  {r.entity_id && <CardDescription>{r.entity_id}</CardDescription>}
+                  <CardTitle>{r.title}</CardTitle>
+                  <CardDescription>{humanize(r.action_type)}{r.entity_id ? ` · ${r.entity_id}` : ""}</CardDescription>
                 </div>
               </div>
               <CardAction className="text-right">
@@ -81,11 +82,9 @@ export function RecommendationList({ recs, compact = false }: { recs: Recommenda
               </CardAction>
             </CardHeader>
             <CardContent className="space-y-2.5">
-              <p className={`text-sm text-muted-foreground ${compact ? "line-clamp-2" : ""}`}>{r.rationale}</p>
+              {r.rationale && <p className={`text-sm text-muted-foreground ${compact ? "line-clamp-2" : ""}`}>{r.rationale}</p>}
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                <Badge variant="outline" className={CONF_TONE[r.confidence]} title={`≈${CONFIDENCE_PCT[r.confidence]}% likely to succeed`}>
-                  {r.confidence} confidence
-                </Badge>
+                {level && <Badge variant="outline" className={CONF_TONE[level]}>{level} confidence</Badge>}
                 {r.expires_at && <span>· act by {new Date(r.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>}
                 {from && !compact && <span className="truncate">· from &ldquo;{from}&rdquo;</span>}
               </div>

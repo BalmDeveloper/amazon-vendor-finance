@@ -7,7 +7,7 @@ import {
   CheckSquare, House, LayoutDashboard, Lightbulb, ListChecks, Menu, MessageSquare, Moon, Plug, Search, Snowflake, Sun, Workflow,
 } from "lucide-react";
 import { openCommandPalette } from "@/components/CommandPalette";
-import { isOverdue } from "@/lib/format";
+import { isOpenRec, isOverdue } from "@/lib/format";
 import { useOps } from "@/lib/ops-store";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -67,7 +67,7 @@ function Links({ onNavigate }: { onNavigate?: () => void }) {
   const path = usePathname();
   const { recommendations, items } = useOps();
   const counts: Record<Badge, number> = {
-    recs: recommendations.filter((r) => r.status === "new").length,
+    recs: recommendations.filter(isOpenRec).length,
     overdue: items.filter((i) => (i.status === "open" || i.status === "in_progress") && isOverdue(i.due_date)).length,
   };
   return (

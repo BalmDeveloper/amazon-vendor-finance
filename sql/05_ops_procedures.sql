@@ -58,8 +58,8 @@ BEGIN
     IF (via NOT IN ('agent', 'user', 'system')) THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'created_via must be agent, user or system');
     END IF;
-    new_id := 'DSH-' || OPS_ID_SEQ.NEXTVAL;
-    INSERT INTO DASHBOARDS (dashboard_id, title, description, business_problem, source_question, created_by, created_via)
+    SELECT 'DSH-' || AMAZON_FINANCE_APP.OPS.OPS_ID_SEQ.NEXTVAL INTO :new_id;
+    INSERT INTO AMAZON_FINANCE_APP.OPS.DASHBOARDS (dashboard_id, title, description, business_problem, source_question, created_by, created_via)
     VALUES (:new_id, TRIM(:TITLE), :DESCRIPTION, :BUSINESS_PROBLEM, :SOURCE_QUESTION, CURRENT_USER(), :via);
     RETURN OBJECT_CONSTRUCT('ok', TRUE, 'dashboard_id', new_id, 'status', 'draft');
 END;
@@ -80,7 +80,7 @@ DECLARE
     next_pos NUMBER;
     dash_status VARCHAR;
 BEGIN
-    SELECT MAX(status) INTO :dash_status FROM DASHBOARDS WHERE dashboard_id = :DASHBOARD_ID;
+    SELECT MAX(status) INTO :dash_status FROM AMAZON_FINANCE_APP.OPS.DASHBOARDS WHERE dashboard_id = :DASHBOARD_ID;
     IF (dash_status IS NULL) THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Dashboard not found');
     END IF;
@@ -90,18 +90,18 @@ BEGIN
     IF (wtype NOT IN ('kpi', 'line', 'bar', 'area', 'pie', 'table')) THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'widget_type must be kpi, line, bar, area, pie or table');
     END IF;
-    CALL VALIDATE_READ_QUERY(:QUERY_SQL) INTO :validation;
+    CALL AMAZON_FINANCE_APP.OPS.VALIDATE_READ_QUERY(:QUERY_SQL) INTO :validation;
     IF (validation IS NOT NULL) THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', validation);
     END IF;
-    SELECT COALESCE(MAX(position), 0) + 1 INTO :next_pos FROM DASHBOARD_WIDGETS WHERE dashboard_id = :DASHBOARD_ID;
-    new_id := 'WGT-' || OPS_ID_SEQ.NEXTVAL;
-    INSERT INTO DASHBOARD_WIDGETS (widget_id, dashboard_id, position, widget_type, title, description,
+    SELECT COALESCE(MAX(position), 0) + 1 INTO :next_pos FROM AMAZON_FINANCE_APP.OPS.DASHBOARD_WIDGETS WHERE dashboard_id = :DASHBOARD_ID;
+    SELECT 'WGT-' || AMAZON_FINANCE_APP.OPS.OPS_ID_SEQ.NEXTVAL INTO :new_id;
+    INSERT INTO AMAZON_FINANCE_APP.OPS.DASHBOARD_WIDGETS (widget_id, dashboard_id, position, widget_type, title, description,
                                    query_sql, semantic_view, chart_config, created_by)
     SELECT :new_id, :DASHBOARD_ID, :next_pos, :wtype, :TITLE, :DESCRIPTION, :QUERY_SQL,
            IFF(CONTAINS(UPPER(:QUERY_SQL), 'SEMANTIC_VIEW('), 'AMAZON_FINANCE_APP.SEMANTIC.AMAZON_VENDOR_FINANCE_SV', NULL),
            :CHART_CONFIG::OBJECT, CURRENT_USER();
-    UPDATE DASHBOARDS SET updated_at = CURRENT_TIMESTAMP(), version = version + 1 WHERE dashboard_id = :DASHBOARD_ID;
+    UPDATE AMAZON_FINANCE_APP.OPS.DASHBOARDS SET updated_at = CURRENT_TIMESTAMP(), version = version + 1 WHERE dashboard_id = :DASHBOARD_ID;
     RETURN OBJECT_CONSTRUCT('ok', TRUE, 'widget_id', new_id, 'position', next_pos);
 END;
 $$;
@@ -119,11 +119,11 @@ BEGIN
     IF (st NOT IN ('draft', 'published', 'archived')) THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'status must be draft, published or archived');
     END IF;
-    SELECT COUNT(*) INTO :widgets FROM DASHBOARD_WIDGETS WHERE dashboard_id = :DASHBOARD_ID;
+    SELECT COUNT(*) INTO :widgets FROM AMAZON_FINANCE_APP.OPS.DASHBOARD_WIDGETS WHERE dashboard_id = :DASHBOARD_ID;
     IF (st = 'published' AND widgets = 0) THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Cannot publish a dashboard with no widgets');
     END IF;
-    UPDATE DASHBOARDS
+    UPDATE AMAZON_FINANCE_APP.OPS.DASHBOARDS
        SET status = :st, updated_at = CURRENT_TIMESTAMP(),
            published_by = IFF(:st = 'published', CURRENT_USER(), published_by),
            published_at = IFF(:st = 'published', CURRENT_TIMESTAMP(), published_at)
@@ -162,8 +162,8 @@ BEGIN
     IF (:TITLE IS NULL OR TRIM(:TITLE) = '') THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Title is required');
     END IF;
-    new_id := 'ACT-' || OPS_ID_SEQ.NEXTVAL;
-    INSERT INTO ACTION_ITEMS (action_item_id, action_type, title, notes, entity_type, entity_id, amount_usd,
+    SELECT 'ACT-' || AMAZON_FINANCE_APP.OPS.OPS_ID_SEQ.NEXTVAL INTO :new_id;
+    INSERT INTO AMAZON_FINANCE_APP.OPS.ACTION_ITEMS (action_item_id, action_type, title, notes, entity_type, entity_id, amount_usd,
                               priority, owner, due_date, source, created_by, updated_by)
     VALUES (:new_id, :atype, TRIM(:TITLE), :NOTES, :ENTITY_TYPE, :ENTITY_ID, :AMOUNT_USD,
             :prio, COALESCE(:OWNER, CURRENT_USER()), :DUE_DATE, :src, CURRENT_USER(), CURRENT_USER());
@@ -185,7 +185,7 @@ BEGIN
     IF (st IS NOT NULL AND st NOT IN ('open', 'in_progress', 'done', 'dismissed')) THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'status must be open, in_progress, done or dismissed');
     END IF;
-    UPDATE ACTION_ITEMS
+    UPDATE AMAZON_FINANCE_APP.OPS.ACTION_ITEMS
        SET status             = COALESCE(:st, status),
            owner              = COALESCE(:OWNER, owner),
            outcome_amount_usd = COALESCE(:OUTCOME_AMOUNT_USD, outcome_amount_usd),
@@ -211,22 +211,22 @@ DECLARE
     new_id VARCHAR;
     cur_status VARCHAR;
 BEGIN
-    SELECT MAX(status) INTO :cur_status FROM RECOMMENDED_ACTIONS WHERE recommendation_id = :RECOMMENDATION_ID;
+    SELECT MAX(status) INTO :cur_status FROM AMAZON_FINANCE_APP.OPS.RECOMMENDED_ACTIONS WHERE recommendation_id = :RECOMMENDATION_ID;
     IF (cur_status IS NULL) THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Recommendation not found');
     END IF;
     IF (cur_status <> 'new') THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Recommendation is already ' || cur_status);
     END IF;
-    new_id := 'ACT-' || OPS_ID_SEQ.NEXTVAL;
-    INSERT INTO ACTION_ITEMS (action_item_id, action_type, title, notes, entity_type, entity_id, amount_usd,
+    SELECT 'ACT-' || AMAZON_FINANCE_APP.OPS.OPS_ID_SEQ.NEXTVAL INTO :new_id;
+    INSERT INTO AMAZON_FINANCE_APP.OPS.ACTION_ITEMS (action_item_id, action_type, title, notes, entity_type, entity_id, amount_usd,
                               priority, owner, source, recommendation_id, insight_id, created_by, updated_by)
     SELECT :new_id, action_type, title, rationale, entity_type, entity_id, estimated_value_usd,
            CASE confidence WHEN 'high' THEN 'high' WHEN 'low' THEN 'low' ELSE 'medium' END,
            COALESCE(:OWNER, CURRENT_USER()), 'recommendation', recommendation_id, insight_id,
            CURRENT_USER(), CURRENT_USER()
-      FROM RECOMMENDED_ACTIONS WHERE recommendation_id = :RECOMMENDATION_ID;
-    UPDATE RECOMMENDED_ACTIONS
+      FROM AMAZON_FINANCE_APP.OPS.RECOMMENDED_ACTIONS WHERE recommendation_id = :RECOMMENDATION_ID;
+    UPDATE AMAZON_FINANCE_APP.OPS.RECOMMENDED_ACTIONS
        SET status = 'accepted', action_item_id = :new_id, decided_by = CURRENT_USER(), decided_at = CURRENT_TIMESTAMP()
      WHERE recommendation_id = :RECOMMENDATION_ID;
     RETURN OBJECT_CONSTRUCT('ok', TRUE, 'recommendation_id', :RECOMMENDATION_ID, 'action_item_id', new_id);
@@ -243,7 +243,7 @@ BEGIN
     IF (:REASON IS NULL OR TRIM(:REASON) = '') THEN
         RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'A reason is required');
     END IF;
-    UPDATE RECOMMENDED_ACTIONS
+    UPDATE AMAZON_FINANCE_APP.OPS.RECOMMENDED_ACTIONS
        SET status = 'dismissed', dismiss_reason = :REASON, decided_by = CURRENT_USER(), decided_at = CURRENT_TIMESTAMP()
      WHERE recommendation_id = :RECOMMENDATION_ID AND status = 'new';
     IF (SQLROWCOUNT = 0) THEN
@@ -253,7 +253,99 @@ BEGIN
 END;
 $$;
 
+-- Creates a dashboard and all its widgets in one call (used by the agent).
+-- WIDGETS_JSON: [{"widget_type","title","description","query_sql","chart_config":{...}}, ...]
+-- All widgets are validated first; if any fails, nothing is saved and every error is returned.
+CREATE OR REPLACE PROCEDURE SAVE_DASHBOARD(
+    TITLE VARCHAR, DESCRIPTION VARCHAR, BUSINESS_PROBLEM VARCHAR,
+    SOURCE_QUESTION VARCHAR, WIDGETS_JSON VARCHAR)
+RETURNS VARIANT
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS
+$$
+DECLARE
+    widgets VARIANT;
+    n NUMBER;
+    i NUMBER DEFAULT 0;
+    w VARIANT;
+    wtype VARCHAR;
+    wtitle VARCHAR;
+    wdesc VARCHAR;
+    wsql VARCHAR;
+    wconfig VARCHAR;
+    pos NUMBER;
+    validation VARCHAR;
+    errors ARRAY DEFAULT ARRAY_CONSTRUCT();
+    new_id VARCHAR;
+    wid VARCHAR;
+BEGIN
+    IF (:TITLE IS NULL OR TRIM(:TITLE) = '') THEN
+        RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Title is required');
+    END IF;
+    widgets := TRY_PARSE_JSON(:WIDGETS_JSON);
+    IF (widgets IS NULL OR NOT IS_ARRAY(widgets) OR ARRAY_SIZE(widgets) = 0) THEN
+        RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'widgets_json must be a non-empty JSON array');
+    END IF;
+    n := ARRAY_SIZE(widgets);
+    IF (n > 12) THEN
+        RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'At most 12 widgets per dashboard');
+    END IF;
+
+    -- Validate every widget before writing anything.
+    WHILE (i < n) DO
+        w := widgets[i];
+        wtype := LOWER(w:widget_type::VARCHAR);
+        IF (wtype IS NULL OR wtype NOT IN ('kpi', 'line', 'bar', 'area', 'pie', 'table')) THEN
+            errors := ARRAY_APPEND(errors, OBJECT_CONSTRUCT('widget', i, 'error', 'widget_type must be kpi, line, bar, area, pie or table'));
+        ELSEIF (w:title IS NULL OR TRIM(w:title::VARCHAR) = '') THEN
+            errors := ARRAY_APPEND(errors, OBJECT_CONSTRUCT('widget', i, 'error', 'title is required'));
+        ELSE
+            wsql := w:query_sql::VARCHAR;
+            CALL AMAZON_FINANCE_APP.OPS.VALIDATE_READ_QUERY(:wsql) INTO :validation;
+            IF (validation IS NOT NULL) THEN
+                errors := ARRAY_APPEND(errors, OBJECT_CONSTRUCT('widget', i, 'title', w:title::VARCHAR, 'error', validation));
+            END IF;
+        END IF;
+        i := i + 1;
+    END WHILE;
+    IF (ARRAY_SIZE(errors) > 0) THEN
+        RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Some widgets are invalid; nothing was saved', 'widget_errors', errors);
+    END IF;
+
+    BEGIN TRANSACTION;
+    SELECT 'DSH-' || AMAZON_FINANCE_APP.OPS.OPS_ID_SEQ.NEXTVAL INTO :new_id;
+    INSERT INTO AMAZON_FINANCE_APP.OPS.DASHBOARDS (dashboard_id, title, description, business_problem, source_question, created_by, created_via)
+    VALUES (:new_id, TRIM(:TITLE), :DESCRIPTION, :BUSINESS_PROBLEM, :SOURCE_QUESTION, CURRENT_USER(), 'agent');
+    i := 0;
+    WHILE (i < n) DO
+        w := widgets[i];
+        wtype := LOWER(w:widget_type::VARCHAR);
+        wtitle := TRIM(w:title::VARCHAR);
+        wdesc := w:description::VARCHAR;
+        wsql := w:query_sql::VARCHAR;
+        wconfig := IFF(IS_OBJECT(w:chart_config), TO_JSON(w:chart_config), NULL);
+        pos := i + 1;
+        SELECT 'WGT-' || AMAZON_FINANCE_APP.OPS.OPS_ID_SEQ.NEXTVAL INTO :wid;
+        INSERT INTO AMAZON_FINANCE_APP.OPS.DASHBOARD_WIDGETS
+            (widget_id, dashboard_id, position, widget_type, title, description, query_sql, semantic_view, chart_config, created_by)
+        SELECT :wid, :new_id, :pos, :wtype, :wtitle, :wdesc, :wsql,
+               IFF(CONTAINS(UPPER(:wsql), 'SEMANTIC_VIEW'), 'AMAZON_FINANCE_APP.SEMANTIC.AMAZON_VENDOR_FINANCE_SV', NULL),
+               PARSE_JSON(:wconfig)::OBJECT, CURRENT_USER();
+        i := i + 1;
+    END WHILE;
+    COMMIT;
+    RETURN OBJECT_CONSTRUCT('ok', TRUE, 'dashboard_id', new_id, 'title', TRIM(:TITLE), 'widgets', n, 'status', 'draft');
+EXCEPTION
+    WHEN OTHER THEN
+        ROLLBACK;
+        RETURN OBJECT_CONSTRUCT('ok', FALSE, 'error', 'Save failed: ' || SQLERRM);
+END;
+$$;
+
 -- Users and the app can call the write procedures; VALIDATE_READ_QUERY is internal.
+GRANT USAGE ON PROCEDURE SAVE_DASHBOARD(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR) TO ROLE AMZ_FIN_USER;
+GRANT USAGE ON PROCEDURE SAVE_DASHBOARD(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR) TO ROLE AMZ_FIN_APP;
 GRANT USAGE ON PROCEDURE CREATE_DASHBOARD(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR) TO ROLE AMZ_FIN_USER;
 GRANT USAGE ON PROCEDURE ADD_WIDGET(VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARIANT) TO ROLE AMZ_FIN_USER;
 GRANT USAGE ON PROCEDURE SET_DASHBOARD_STATUS(VARCHAR, VARCHAR) TO ROLE AMZ_FIN_USER;

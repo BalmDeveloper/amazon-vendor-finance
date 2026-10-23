@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { humanize, usd } from "@/lib/format";
+import { humanize, isOpenRec, usd } from "@/lib/format";
 import { useOps } from "@/lib/ops-store";
 import type { Insight } from "@/lib/types";
 
@@ -19,19 +19,25 @@ const SEVERITY: Record<Insight["severity"], string> = {
   low: "bg-muted text-muted-foreground",
 };
 
-const metricValue = (i: Insight, v: number | null) =>
-  v == null ? "–" : /\$/.test(i.metric) ? usd(v) : /rate|%/i.test(i.metric) ? `${v}%` : Intl.NumberFormat("en-US").format(v);
+// Platform insights may omit a metric label; then large values are dollars.
+const metricValue = (i: Insight, v: number | null | undefined) => {
+  if (v == null) return "–";
+  const m = i.metric ?? "";
+  if (/\$/.test(m) || (!m && Math.abs(v) >= 1000)) return usd(v);
+  if (/rate|%/i.test(m)) return `${v}%`;
+  return Intl.NumberFormat("en-US").format(v);
+};
 
 export default function InsightsPage() {
   const { ready, sample, insights, recommendations: recs } = useOps();
   const [area, setArea] = useState("all");
 
   const open = useMemo(
-    () => recs.filter((r) => r.status === "new").sort((a, b) => b.estimated_value_usd - a.estimated_value_usd),
+    () => recs.filter(isOpenRec).sort((a, b) => (b.estimated_value_usd ?? 0) - (a.estimated_value_usd ?? 0)),
     [recs],
   );
-  const totalValue = open.reduce((s, r) => s + r.estimated_value_usd, 0);
-  const shown = insights.filter((i) => area === "all" || i.problem_area === area);
+  const totalValue = open.reduce((s, r) => s + (r.estimated_value_usd ?? 0), 0);
+  const shown = insights.filter((i) => area === "all" || i.business_problem === area);
 
   return (
     <div className="h-full overflow-y-auto">
@@ -69,7 +75,7 @@ export default function InsightsPage() {
           )}
 
           {shown.map((i) => {
-            const A = AREA[i.problem_area] ?? { label: humanize(i.problem_area), icon: Lightbulb, playbook: "" };
+            const A = AREA[i.business_problem] ?? { label: humanize(i.business_problem), icon: Lightbulb, playbook: "" };
             return (
               <Card key={i.id}>
                 <CardHeader>
@@ -88,7 +94,7 @@ export default function InsightsPage() {
                 </CardHeader>
                 <CardFooter className="flex flex-wrap items-end justify-between gap-4 border-t pt-4">
                   <div>
-                    <div className="text-xs text-muted-foreground">{i.metric}</div>
+                    <div className="text-xs text-muted-foreground">{i.metric ?? "Current value"}</div>
                     <div className="flex items-baseline gap-2">
                       <span className="text-2xl font-semibold tabular-nums tracking-tight">{metricValue(i, i.current_value)}</span>
                       {i.comparison_value != null && <span className="text-sm text-muted-foreground">vs {metricValue(i, i.comparison_value)}</span>}
@@ -99,11 +105,11 @@ export default function InsightsPage() {
                       )}
                     </div>
                   </div>
-                  {i.related_entity && <span className="text-xs text-muted-foreground">{i.related_entity}</span>}
+                  {i.entity_id && <span className="text-xs text-muted-foreground">{i.entity_id}</span>}
                   <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t pt-3">
                     <DecisionBar
                       title={i.title}
-                      detail={i.summary}
+                      detail={i.summary ?? undefined}
                       followUp={`Tell me more about: ${i.title}. What is driving it and what should we do first?`}
                       actionType={recs.find((r) => r.insight_id === i.id)?.action_type ?? "other"}
                     />
