@@ -2,7 +2,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, Archive, LayoutDashboard, Loader2, RefreshCw, Send, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 import { ChartCard } from "@/components/ChartCard";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fmt } from "@/components/ChartView";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,7 +13,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Dashboard, WidgetData } from "@/lib/types";
 
 const SPAN = { 1: "lg:col-span-1", 2: "lg:col-span-2", 3: "lg:col-span-3" } as const;
-const NEW_DASHBOARD = "/?q=Build%20a%20shortage%20recovery%20dashboard";
+const NEW_DASHBOARD = "/assistant?q=Build%20a%20shortage%20recovery%20dashboard";
 
 function defaultSpan(w: WidgetData) {
   return w.spec.span ?? (w.spec.type === "table" ? 3 : 1);
@@ -23,6 +25,7 @@ export default function DashboardPage() {
   const [widgets, setWidgets] = useState<WidgetData[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   const loadList = useCallback(async (wanted?: string | null) => {
     const r = await fetch("/api/dashboards");
@@ -55,7 +58,6 @@ export default function DashboardPage() {
   }
 
   async function setStatus(status: "published" | "archived") {
-    if (status === "archived" && !confirm("Archive this dashboard? It will no longer be listed.")) return;
     setBusy(true);
     const r = await fetch(`/api/dashboards/${encodeURIComponent(active)}`, {
       method: "PATCH",
@@ -64,7 +66,8 @@ export default function DashboardPage() {
     });
     const body = await r.json();
     setBusy(false);
-    if (!r.ok) return alert(body.error ?? "Could not update the dashboard");
+    if (!r.ok) return void toast.error(body.error ?? "Couldn't update the dashboard");
+    toast.success(status === "published" ? "Dashboard published" : "Dashboard archived");
     await loadList(status === "archived" ? null : active);
   }
 
@@ -75,12 +78,12 @@ export default function DashboardPage() {
   return (
     <div className="h-full overflow-y-auto">
       <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-8 py-5 flex items-center justify-between gap-4">
+        <div className="mx-auto max-w-7xl px-4 sm:px-8 py-5 flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-semibold tracking-tight truncate">{current?.title ?? "Dashboards"}</h1>
               {current && (
-                <Badge variant="outline" className={current.status === "published" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "text-muted-foreground"}>
+                <Badge variant="outline" className={current.status === "published" ? "border-success/30 bg-success-soft text-success" : "text-muted-foreground"}>
                   {current.status}
                 </Badge>
               )}
@@ -102,7 +105,7 @@ export default function DashboardPage() {
               </Button>
             )}
             {current?.mine && (
-              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setStatus("archived")} disabled={busy}>
+              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setConfirmArchive(true)} disabled={busy}>
                 <Archive /> Archive
               </Button>
             )}
@@ -112,7 +115,7 @@ export default function DashboardPage() {
           </div>
         </div>
         {dashboards && dashboards.length > 1 && (
-          <div className="mx-auto max-w-7xl px-8 pb-3 overflow-x-auto">
+          <div className="mx-auto max-w-7xl px-4 sm:px-8 pb-3 overflow-x-auto">
             <Tabs value={active} onValueChange={(v) => select(String(v))}>
               <TabsList>
                 {dashboards.map((d) => (
@@ -127,9 +130,9 @@ export default function DashboardPage() {
         )}
       </header>
 
-      <div className="mx-auto max-w-7xl px-8 py-6 space-y-4">
+      <div className="mx-auto max-w-7xl px-4 sm:px-8 py-6 space-y-4">
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-800">{error}</div>
+          <div className="rounded-lg border border-destructive/30 bg-danger-soft px-4 py-2.5 text-sm text-destructive">{error}</div>
         )}
 
         {dashboards?.length === 0 && (
@@ -163,6 +166,16 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmArchive}
+        onOpenChange={setConfirmArchive}
+        title={`Archive "${current?.title ?? "dashboard"}"?`}
+        description="It will no longer be listed. Its saved queries are kept."
+        confirmLabel="Archive dashboard"
+        destructive
+        onConfirm={() => { setConfirmArchive(false); setStatus("archived"); }}
+      />
     </div>
   );
 }

@@ -46,7 +46,7 @@ export function ChartView({ spec, height }: { spec: ChartSpec; height?: number }
             <div className="text-xs text-muted-foreground">{String(d.label ?? d[xKey] ?? "")}</div>
             <div className="text-2xl font-semibold tabular-nums tracking-tight">{fmt(d.value ?? d[yKeys[0]], (d.unit as string) || unit)}</div>
             {d.delta != null && (
-              <div className={`text-xs ${Number(d.delta) >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+              <div className={`text-xs ${Number(d.delta) >= 0 ? "text-success" : "text-destructive"}`}>
                 {Number(d.delta) >= 0 ? "▲" : "▼"} {fmt(Math.abs(Number(d.delta)), "%")}
               </div>
             )}

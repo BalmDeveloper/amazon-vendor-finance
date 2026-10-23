@@ -24,7 +24,7 @@ export function ChartCard({ spec, action, className = "" }: { spec: ChartSpec; a
           {spec.trend && (
             <div className="flex items-center gap-2 font-medium leading-none">
               Trending {up ? "up" : "down"} by {Math.abs(spec.trend.value).toFixed(1)}%{spec.trend.label ? ` ${spec.trend.label}` : ""}
-              {up ? <TrendingUp className="size-4 text-emerald-600" /> : <TrendingDown className="size-4 text-red-600" />}
+              {up ? <TrendingUp className="size-4 text-success" /> : <TrendingDown className="size-4 text-destructive" />}
             </div>
           )}
           {spec.footnote && <div className="leading-none text-muted-foreground">{spec.footnote}</div>}

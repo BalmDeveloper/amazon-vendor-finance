@@ -10,10 +10,10 @@ import { chatToolkit } from "./chat/toolkit";
 import { fromStored, useFinanceRuntime } from "./chat/use-finance-runtime";
 
 const SUGGESTIONS = [
-  { title: "Shortage recovery dashboard", label: "deducted vs. recovered, dispute outcomes", prompt: "Build a shortage recovery dashboard." },
-  { title: "Deductions by category", label: "where Amazon's deductions go", prompt: "How much did Amazon deduct in total, by category?" },
-  { title: "Cash outstanding", label: "unpaid invoices by status", prompt: "Which invoices are still unpaid, and how much cash is outstanding?" },
-  { title: "Co-op without deductions", label: "charges Amazon hasn't taken yet", prompt: "Which co-op invoices have no matching deduction yet, and how much do they total?" },
+  { title: "What should I act on first?", label: "ranked by recoverable $", prompt: "What are the top 3 things I should act on this week to recover money? Rank by estimated value and create action items." },
+  { title: "Disputable shortages", label: "before the window closes", prompt: "Which shortage claims are still disputable, and how much could we recover? Chart it by month." },
+  { title: "Unexplained deductions", label: "categorize and route", prompt: "Break down unexplained deductions by likely category and suggest who should resolve each." },
+  { title: "Cash collection dashboard", label: "aging, pending, unpaid", prompt: "Build a cash collection dashboard: unpaid invoices by age bucket, pending Amazon action, and the top invoices to chase." },
 ];
 
 function Welcome() {
@@ -109,8 +109,11 @@ export function Chat() {
             ))}
           </nav>
         </aside>
-        <section className="min-w-0 flex-1 bg-background">
-          <Thread components={{ Welcome }} />
+        <section className="flex min-w-0 flex-1 flex-col bg-background">
+          <div className="flex items-center justify-end border-b px-3 py-1.5 md:hidden">
+            <Button size="sm" variant="ghost" onClick={newChat}><MessageSquarePlus /> New conversation</Button>
+          </div>
+          <div className="min-h-0 flex-1"><Thread components={{ Welcome }} /></div>
         </section>
       </div>
     </AssistantRuntimeProvider>

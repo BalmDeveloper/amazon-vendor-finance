@@ -133,10 +133,10 @@ export async function listActionItems(): Promise<ActionItem[]> {
   }));
 }
 
-export async function createActionItem(i: { title: string; notes?: string | null; owner?: string | null; priority?: string; due_date?: string | null; amount_usd?: number | null }) {
+export async function createActionItem(i: { title: string; action_type?: string; notes?: string | null; owner?: string | null; priority?: string; due_date?: string | null; amount_usd?: number | null; source?: string }) {
   const r = ok(
     await callProc("AMAZON_FINANCE_APP.OPS.CREATE_ACTION_ITEM", [
-      "other",
+      i.action_type ?? "other",
       i.title,
       null,
       null,
@@ -145,7 +145,7 @@ export async function createActionItem(i: { title: string; notes?: string | null
       i.owner ?? null,
       i.due_date ?? null,
       i.notes ?? null,
-      "user",
+      i.source ?? "user",
     ]),
   );
   return String(r.action_item_id);
@@ -160,7 +160,9 @@ export async function updateActionItem(id: string, u: { status?: ActionStatus; o
 // ---------- insights & recommendations ----------
 export async function listInsights(): Promise<Insight[]> {
   return sql<Insight>(
-    `SELECT insight_id AS id, business_problem, severity, title, summary, current_value, change_pct, dashboard_id, generated_at
+    `SELECT insight_id AS id, business_problem AS problem_area, severity, title, summary, metric_name AS metric,
+            current_value, comparison_value, change_pct, evidence_sql,
+            IFF(entity_id IS NULL, NULL, entity_type || ' ' || entity_id) AS related_entity, dashboard_id, generated_at
        FROM AMAZON_FINANCE_APP.OPS.INSIGHTS
       WHERE status = 'active'
       ORDER BY DECODE(severity, 'high', 0, 'medium', 1, 2), generated_at DESC LIMIT 50`,
@@ -169,16 +171,17 @@ export async function listInsights(): Promise<Insight[]> {
 
 export async function listRecommendations(): Promise<Recommendation[]> {
   const rows = await sql<Recommendation>(
-    `SELECT recommendation_id AS id, title, rationale, action_type, estimated_value_usd, confidence, created_at
+    `SELECT recommendation_id AS id, insight_id, title, rationale, action_type, entity_type, entity_id,
+            estimated_value_usd, confidence, status, action_item_id, expires_at, created_at
        FROM AMAZON_FINANCE_APP.OPS.RECOMMENDED_ACTIONS
       WHERE status = 'new' AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP())
       ORDER BY estimated_value_usd DESC NULLS LAST LIMIT 50`,
   );
-  return rows.map((r) => ({ ...r, estimated_value_usd: r.estimated_value_usd == null ? null : Number(r.estimated_value_usd) }));
+  return rows.map((r) => ({ ...r, estimated_value_usd: Number(r.estimated_value_usd ?? 0) }));
 }
 
-export async function acceptRecommendation(id: string) {
-  return ok(await callProc("AMAZON_FINANCE_APP.OPS.ACCEPT_RECOMMENDATION", [id, null]));
+export async function acceptRecommendation(id: string, owner: string | null) {
+  return ok(await callProc("AMAZON_FINANCE_APP.OPS.ACCEPT_RECOMMENDATION", [id, owner]));
 }
 
 export async function dismissRecommendation(id: string, reason: string | null) {

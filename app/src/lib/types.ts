@@ -71,31 +71,11 @@ export type ActionItem = {
   status: ActionStatus;
   due_date?: string | null;
   amount_usd?: number | null;
+  /** Amount actually recovered or collected, recorded on completion. */
   outcome_amount_usd?: number | null;
-  source?: string;
+  source?: "agent" | "user" | "alert" | "recommendation" | string | null;
+  recommendation_id?: string | null;
   created_at?: string;
-};
-
-export type Insight = {
-  id: string;
-  business_problem: string;
-  severity: string;
-  title: string;
-  summary: string | null;
-  current_value: number | null;
-  change_pct: number | null;
-  dashboard_id: string | null;
-  generated_at: string;
-};
-
-export type Recommendation = {
-  id: string;
-  title: string;
-  rationale: string | null;
-  action_type: string;
-  estimated_value_usd: number | null;
-  confidence: number | null;
-  created_at: string;
 };
 
 /** Events streamed to the chat UI and persisted on assistant messages. */
@@ -117,4 +97,80 @@ export type Message = {
   content: string;
   events: AgentEvent[];
   created_at: string;
+};
+
+/** OPS.INSIGHTS row (sql/04_ops_tables.sql). */
+export type Insight = {
+  id: string;
+  generated_at: string;
+  problem_area: "shortage_recovery" | "unexplained_deductions" | "cash_collection" | string;
+  severity: "high" | "medium" | "low";
+  title: string;
+  summary: string;
+  metric: string;
+  current_value: number | null;
+  comparison_value: number | null;
+  change_pct: number | null;
+  evidence_sql?: string | null;
+  related_entity?: string | null;
+  dashboard_id?: string | null;
+};
+
+/** OPS.RECOMMENDED_ACTIONS row (sql/04_ops_tables.sql). */
+export type Recommendation = {
+  id: string;
+  insight_id: string | null;
+  action_type: string;
+  title?: string;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  estimated_value_usd: number;
+  confidence: "high" | "medium" | "low";
+  rationale: string;
+  status: "new" | "accepted" | "dismissed" | "expired";
+  action_item_id?: string | null;
+  expires_at?: string | null;
+  created_at?: string;
+};
+
+/** Success metrics from docs/plan.md, shown on the Today page. */
+export type Metrics = {
+  shortage_recovery_rate_pct: number;
+  deduction_categorized_pct: number;
+  unpaid_over_60d_usd: number;
+  median_hours_to_action: number | null;
+  recovered_to_date_usd: number;
+};
+
+export type PlaybookStep = {
+  id: string;
+  title: string;
+  description: string;
+  /** "review" shows a checklist of rows; "assign" asks for owner/due; "confirm" creates action items. */
+  kind: "review" | "assign" | "confirm";
+};
+
+export type Playbook = {
+  id: string;
+  title: string;
+  problem_area: string;
+  summary: string;
+  action_type: string;
+  estimated_value_usd: number;
+  /** Candidate rows the playbook works through. */
+  rows: { id: string; label: string; detail: string; value_usd: number }[];
+  steps: PlaybookStep[];
+};
+
+export type Automation = {
+  id: string;
+  title: string;
+  description: string;
+  kind: "digest" | "alert" | "refresh";
+  channel: "slack" | "email" | "app";
+  cadence: "hourly" | "daily" | "weekly";
+  enabled: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  threshold_usd?: number;
 };
