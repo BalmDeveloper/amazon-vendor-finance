@@ -24,7 +24,7 @@ type OpsState = {
   accept: (recs: Recommendation[], input: AcceptInput) => Promise<boolean>;
   dismiss: (recs: Recommendation[], reason?: string) => Promise<boolean>;
   updateItems: (ids: string[], patch: Partial<ActionItem>) => Promise<boolean>;
-  createItems: (items: Omit<ActionItem, "id" | "chat_id" | "status">[]) => Promise<boolean>;
+  createItems: (items: Omit<ActionItem, "id" | "status">[]) => Promise<boolean>;
   removeItem: (id: string) => Promise<boolean>;
   reload: () => void;
 };
@@ -84,9 +84,9 @@ export function OpsProvider({ children }: { children: ReactNode }) {
     const beforeRecs = recommendations;
     const beforeItems = items;
     const created: ActionItem[] = recs.map((r) => ({
-      id: tmpId(), chat_id: null, status: "open", priority: r.estimated_value_usd >= 100_000 ? "high" : "medium",
+      id: tmpId(), status: "open", priority: r.estimated_value_usd >= 100_000 ? "high" : "medium",
       title: `${humanize(r.action_type)}${r.entity_id ? `: ${r.entity_id}` : ""}`,
-      detail: input.note || r.rationale, owner: input.owner, due_date: input.due_date ?? null,
+      notes: input.note || r.rationale, owner: input.owner, due_date: input.due_date ?? null,
       action_type: r.action_type, source: "recommendation", recommendation_id: r.id,
     }));
     setRecs((all) => all.map((r) => (ids.has(r.id) ? { ...r, status: "accepted", action_item_id: created.find((c) => c.recommendation_id === r.id)?.id } : r)));
@@ -129,7 +129,7 @@ export function OpsProvider({ children }: { children: ReactNode }) {
   }, [items, itemsLive]);
 
   const createItems = useCallback<OpsState["createItems"]>(async (newItems) => {
-    const created: ActionItem[] = newItems.map((i) => ({ ...i, id: tmpId(), chat_id: null, status: "open" }));
+    const created: ActionItem[] = newItems.map((i) => ({ ...i, id: tmpId(), status: "open" }));
     const before = items;
     setItems((all) => [...created, ...all]);
     if (!itemsLive) return true;
@@ -143,8 +143,9 @@ export function OpsProvider({ children }: { children: ReactNode }) {
     const before = items;
     setItems((all) => all.filter((i) => i.id !== id));
     if (!itemsLive) return true;
-    const r = await fetch(`/api/actions/${id}`, { method: "DELETE" });
-    if (!r.ok) { setItems(before); toast.error("Couldn't delete the item"); return false; }
+    // Items are never deleted; "dismissed" takes them off the board.
+    const r = await fetch(`/api/actions/${id}`, { method: "PATCH", ...json({ status: "dismissed" }) });
+    if (!r.ok) { setItems(before); toast.error("Couldn't dismiss the item"); return false; }
     return true;
   }, [items, itemsLive]);
 

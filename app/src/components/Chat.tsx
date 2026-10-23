@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { Chat as ChatT, Message } from "@/lib/types";
 import { chatToolkit } from "./chat/toolkit";
-import { fromStored, useSalesRuntime } from "./chat/use-sales-runtime";
+import { fromStored, useFinanceRuntime } from "./chat/use-finance-runtime";
 
 const SUGGESTIONS = [
   { title: "What should I act on first?", label: "ranked by recoverable $", prompt: "What are the top 3 things I should act on this week to recover money? Rank by estimated value and create action items." },
@@ -23,7 +23,7 @@ function Welcome() {
         <Sparkles className="size-5" />
       </div>
       <p className="text-2xl font-semibold tracking-tight">Good to see you.</p>
-      <p className="text-2xl tracking-tight text-muted-foreground">What would you like to know about your sales?</p>
+      <p className="text-2xl tracking-tight text-muted-foreground">What should we look at in your Amazon finances?</p>
     </div>
   );
 }
@@ -48,7 +48,7 @@ export function Chat() {
     () => ({ chatId, onChatId: setChatId, onSettled: () => setReloadKey((k) => k + 1) }),
     [chatId],
   );
-  const { runtime, setMessages } = useSalesRuntime(runtimeOpts);
+  const { runtime, setMessages } = useFinanceRuntime(runtimeOpts);
   const config = useMemo(() => AuiConfig({ tools: Tools({ toolkit: chatToolkit }), suggestions: Suggestions(SUGGESTIONS) }), []);
 
   // ?q=… from other pages pre-fills the composer

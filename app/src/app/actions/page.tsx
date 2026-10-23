@@ -1,7 +1,7 @@
 "use client";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { CheckSquare, Circle, CircleCheck, CircleDot, Plus, Sparkles, Trash2, UserRound, X } from "lucide-react";
+import { CheckSquare, Circle, CircleCheck, CircleDot, Plus, Sparkles, UserRound, X } from "lucide-react";
 import { OutcomeDialog } from "@/components/DecisionDialogs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -152,14 +152,15 @@ export default function ActionsPage() {
                           <div className="flex items-start gap-2">
                             <Checkbox className="mt-0.5" aria-label={`Select ${i.title}`} checked={selected.has(i.id)} onCheckedChange={() => toggle(i.id)} />
                             <div className={`flex-1 text-sm font-medium ${i.status === "done" ? "text-muted-foreground line-through" : ""}`}>{i.title}</div>
-                            <Button size="icon" variant="ghost" onClick={() => removeItem(i.id).then((ok) => ok && toast("Action item deleted", { description: i.title }))}
-                              aria-label="Delete" className="size-6 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100">
-                              <Trash2 />
+                            <Button size="icon" variant="ghost" onClick={() => removeItem(i.id).then((ok) => ok && toast("Action item dismissed", { description: i.title }))}
+                              aria-label="Dismiss" title="Dismiss" className="size-6 text-muted-foreground opacity-0 group-hover:opacity-100 focus-visible:opacity-100">
+                              <X />
                             </Button>
                           </div>
-                          {i.detail && <p className="pl-6 text-xs text-muted-foreground line-clamp-2">{i.detail}</p>}
+                          {i.notes && <p className="pl-6 text-xs text-muted-foreground line-clamp-2">{i.notes}</p>}
                           <div className="flex flex-wrap items-center gap-1.5 pl-6 text-xs text-muted-foreground">
                             <Badge variant="outline" className={PRIORITY[i.priority ?? "medium"]}>{i.priority ?? "medium"}</Badge>
+                            {i.amount_usd != null && <span className="font-medium tabular-nums text-foreground">{usd(i.amount_usd)}</span>}
                             {i.action_type && i.action_type !== "other" && <span>{humanize(i.action_type)}</span>}
                             {i.owner && <span className="inline-flex items-center gap-1"><UserRound className="size-3" />{i.owner}</span>}
                             {i.due_date && <span className={late ? "font-medium text-destructive" : ""}>· {late ? "overdue" : "due"} {i.due_date}</span>}
@@ -193,3 +194,4 @@ export default function ActionsPage() {
     </div>
   );
 }
+

@@ -55,7 +55,7 @@ export function DecisionBar({
         onConfirm={async (input) => {
           setOpen(false);
           const ok = await createItems([{
-            title, detail: input.note || detail, owner: input.owner, due_date: input.due_date ?? null,
+            title, notes: input.note || detail, owner: input.owner, due_date: input.due_date ?? null,
             priority: "medium", action_type: actionType, source: "user",
           }]);
           if (ok) toast.success(`Action item assigned to ${input.owner}`, {

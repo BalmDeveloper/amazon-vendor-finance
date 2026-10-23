@@ -1,173 +1,189 @@
 import "server-only";
-import { randomUUID } from "crypto";
-import { lower, query } from "./snowflake";
-import type { ActionItem, ChartSpec, Chat, Dashboard, DashboardSpec, Message, Widget } from "./types";
+import { plainRows, widgetChart } from "./charts";
+import { callProc, json, sql, sqlLongRaw, type ProcResult } from "./snowflake";
+import type { ActionItem, ActionStatus, ChartConfig, Chat, Dashboard, DashboardStatus, Insight, Message, Recommendation, WidgetData } from "./types";
+
+// All reads run as the signed-in user; all writes go through owner's-rights procedures,
+// which validate input and record CURRENT_USER().
+
+function ok(r: ProcResult): ProcResult {
+  if (!r?.ok) throw new Error(r?.error ?? "Request failed");
+  return r;
+}
+
+const parse = <T>(v: unknown, fallback: T): T => (typeof v === "string" ? JSON.parse(v) : (v ?? fallback)) as T;
 
 // ---------- chats ----------
 export async function listChats(): Promise<Chat[]> {
-  return lower<Chat>(
-    await query(
-      "SELECT ID, TITLE, CREATED_AT, UPDATED_AT FROM CHATS ORDER BY UPDATED_AT DESC LIMIT 50",
-    ),
+  return sql<Chat>(
+    "SELECT chat_id AS id, title, created_at, updated_at FROM AMAZON_FINANCE_APP.APP.MY_CHATS ORDER BY updated_at DESC LIMIT 50",
   );
 }
 
 export async function createChat(title: string): Promise<string> {
-  const id = randomUUID();
-  await query("INSERT INTO CHATS (ID, TITLE) VALUES (?, ?)", [id, title]);
-  return id;
-}
-
-export async function touchChat(id: string, sandboxId?: string) {
-  await query(
-    "UPDATE CHATS SET UPDATED_AT = CURRENT_TIMESTAMP(), SANDBOX_ID = COALESCE(?, SANDBOX_ID) WHERE ID = ?",
-    [sandboxId ?? null, id],
-  );
+  return String(ok(await callProc("AMAZON_FINANCE_APP.APP.CREATE_CHAT", [title])).chat_id);
 }
 
 export async function deleteChat(id: string) {
-  await query("DELETE FROM MESSAGES WHERE CHAT_ID = ?", [id]);
-  await query("DELETE FROM CHATS WHERE ID = ?", [id]);
+  ok(await callProc("AMAZON_FINANCE_APP.APP.DELETE_CHAT", [id]));
 }
 
-// ---------- messages ----------
 export async function listMessages(chatId: string): Promise<Message[]> {
-  const rows = lower<Message & { events: unknown }>(
-    await query(
-      "SELECT ID, CHAT_ID, ROLE, CONTENT, EVENTS, CREATED_AT FROM MESSAGES WHERE CHAT_ID = ? ORDER BY CREATED_AT",
-      [chatId],
-    ),
+  const rows = await sql<Message & { events: unknown }>(
+    `SELECT message_id AS id, chat_id, role, content, events, created_at
+       FROM AMAZON_FINANCE_APP.APP.MY_MESSAGES WHERE chat_id = ? ORDER BY created_at, message_id`,
+    [chatId],
   );
-  return rows.map((r) => ({
-    ...r,
-    events: typeof r.events === "string" ? JSON.parse(r.events) : (r.events ?? []),
-  })) as Message[];
+  return rows.map((r) => ({ ...r, content: r.content ?? "", events: parse(r.events, []) }));
 }
 
-export async function addMessage(
-  chatId: string,
-  role: "user" | "assistant",
-  content: string,
-  events: unknown[] = [],
-): Promise<string> {
-  const id = randomUUID();
-  await query(
-    "INSERT INTO MESSAGES (ID, CHAT_ID, ROLE, CONTENT, EVENTS) SELECT ?, ?, ?, ?, PARSE_JSON(?)",
-    [id, chatId, role, content, JSON.stringify(events)],
+export async function addMessage(chatId: string, role: "user" | "assistant", content: string, events: unknown[] = []) {
+  ok(await callProc("AMAZON_FINANCE_APP.APP.SAVE_MESSAGE", [chatId, role, content, JSON.stringify(events)]));
+}
+
+// ---------- dashboards ----------
+/** Published dashboards plus the user's own drafts. */
+export async function listDashboards(): Promise<Dashboard[]> {
+  const rows = await sql<Dashboard & { mine: unknown }>(
+    `SELECT d.dashboard_id AS id, d.title, d.description, d.business_problem, d.status, d.created_by, d.created_via,
+            d.updated_at, COUNT(w.widget_id) AS widget_count, d.created_by = CURRENT_USER() AS mine
+       FROM AMAZON_FINANCE_APP.OPS.DASHBOARDS d
+       LEFT JOIN AMAZON_FINANCE_APP.OPS.DASHBOARD_WIDGETS w ON w.dashboard_id = d.dashboard_id
+      WHERE d.status = 'published' OR (d.status = 'draft' AND d.created_by = CURRENT_USER())
+      GROUP BY ALL
+      ORDER BY IFF(d.status = 'published', 0, 1), d.updated_at DESC`,
   );
-  return id;
+  return rows.map((r) => ({ ...r, widget_count: Number(r.widget_count), mine: Boolean(r.mine) }));
+}
+
+type WidgetRow = {
+  widget_id: string;
+  position: number;
+  widget_type: string;
+  title: string;
+  description: string | null;
+  query_sql: string;
+  chart_config: unknown;
+};
+
+/** Runs every widget's stored query as the signed-in user, in parallel; one failure doesn't break the rest. */
+export async function dashboardData(dashboardId: string): Promise<WidgetData[]> {
+  const widgets = await sql<WidgetRow>(
+    `SELECT w.widget_id, w.position, w.widget_type, w.title, w.description, w.query_sql, w.chart_config
+       FROM AMAZON_FINANCE_APP.OPS.DASHBOARD_WIDGETS w
+       JOIN AMAZON_FINANCE_APP.OPS.DASHBOARDS d ON d.dashboard_id = w.dashboard_id
+      WHERE w.dashboard_id = ? AND (d.status = 'published' OR d.created_by = CURRENT_USER())
+      ORDER BY w.position`,
+    [dashboardId],
+  );
+  return Promise.all(
+    widgets.map(async (w) => {
+      const meta = { ...w, chart_config: parse<ChartConfig | null>(w.chart_config, null) };
+      try {
+        const rows = plainRows(await sqlLongRaw(w.query_sql.replace(/;\s*$/, "")));
+        return { id: w.widget_id, position: Number(w.position), spec: widgetChart(meta, rows) };
+      } catch (e) {
+        return {
+          id: w.widget_id,
+          position: Number(w.position),
+          spec: widgetChart(meta, []),
+          error: (e as Error).message,
+        };
+      }
+    }),
+  );
+}
+
+export async function setDashboardStatus(id: string, status: DashboardStatus) {
+  return ok(await callProc("AMAZON_FINANCE_APP.OPS.SET_DASHBOARD_STATUS", [id, status]));
+}
+
+export async function createDashboard(title: string, description: string | null, sourceQuestion: string | null) {
+  const r = ok(await callProc("AMAZON_FINANCE_APP.OPS.CREATE_DASHBOARD", [title, description, "general", sourceQuestion, "user"]));
+  return String(r.dashboard_id);
+}
+
+/** Saves a chart from chat as a live widget (ADD_WIDGET validates the query). */
+export async function addWidget(dashboardId: string, w: { type: string; title: string; description?: string; sql: string; config: ChartConfig }) {
+  return ok(
+    await callProc("AMAZON_FINANCE_APP.OPS.ADD_WIDGET", [
+      dashboardId,
+      w.type,
+      w.title,
+      w.description ?? null,
+      w.sql,
+      json(w.config),
+    ]),
+  );
 }
 
 // ---------- action items ----------
 export async function listActionItems(): Promise<ActionItem[]> {
-  return lower<ActionItem>(
-    await query(
-      "SELECT ID, CHAT_ID, TITLE, DETAIL, OWNER, PRIORITY, STATUS, TO_VARCHAR(DUE_DATE) AS DUE_DATE, CREATED_AT FROM ACTION_ITEMS ORDER BY STATUS, CREATED_AT DESC",
-    ),
-  );
-}
-
-export async function addActionItems(
-  chatId: string | null,
-  items: Omit<ActionItem, "id" | "chat_id" | "status" | "created_at">[],
-): Promise<ActionItem[]> {
-  const out: ActionItem[] = [];
-  for (const it of items) {
-    const id = randomUUID();
-    await query(
-      "INSERT INTO ACTION_ITEMS (ID, CHAT_ID, TITLE, DETAIL, OWNER, PRIORITY, DUE_DATE) VALUES (?, ?, ?, ?, ?, ?, TRY_TO_DATE(?))",
-      [
-        id,
-        chatId,
-        it.title,
-        it.detail ?? null,
-        it.owner ?? null,
-        it.priority ?? "medium",
-        it.due_date ?? null,
-      ],
-    );
-    out.push({ ...it, id, chat_id: chatId, status: "open" });
-  }
-  return out;
-}
-
-const STATUSES = new Set(["open", "in_progress", "done"]);
-
-export async function updateActionStatus(id: string, status: string) {
-  if (!STATUSES.has(status)) throw new Error("invalid status");
-  await query("UPDATE ACTION_ITEMS SET STATUS = ? WHERE ID = ?", [status, id]);
-}
-
-export async function deleteActionItem(id: string) {
-  await query("DELETE FROM ACTION_ITEMS WHERE ID = ?", [id]);
-}
-
-// ---------- dashboards / widgets ----------
-const DEFAULT_DASHBOARD = "default";
-
-async function ensureDefaultDashboard() {
-  await query(
-    "MERGE INTO DASHBOARDS d USING (SELECT ? AS ID) s ON d.ID = s.ID WHEN NOT MATCHED THEN INSERT (ID, NAME) VALUES (s.ID, 'Pinned')",
-    [DEFAULT_DASHBOARD],
-  );
-}
-
-export async function listDashboards(): Promise<Dashboard[]> {
-  await ensureDefaultDashboard();
-  return lower<Dashboard>(
-    await query(
-      `SELECT d.ID, d.NAME, d.CREATED_AT, COUNT(w.ID) AS WIDGET_COUNT
-       FROM DASHBOARDS d LEFT JOIN WIDGETS w ON w.DASHBOARD_ID = d.ID
-       GROUP BY d.ID, d.NAME, d.CREATED_AT
-       ORDER BY IFF(d.ID = ?, 0, 1), d.CREATED_AT DESC`,
-      [DEFAULT_DASHBOARD],
-    ),
-  );
-}
-
-/** Creates a dashboard with all its widgets in one go (used by the build-dashboard skill). */
-export async function createDashboard(chatId: string | null, spec: DashboardSpec): Promise<string> {
-  const id = randomUUID();
-  await query("INSERT INTO DASHBOARDS (ID, NAME) VALUES (?, ?)", [id, spec.name.slice(0, 120)]);
-  let pos = 0;
-  for (const w of spec.widgets.slice(0, 24)) {
-    await query(
-      "INSERT INTO WIDGETS (ID, DASHBOARD_ID, CHAT_ID, TITLE, SPEC, POSITION) SELECT ?, ?, ?, ?, PARSE_JSON(?), ?",
-      [randomUUID(), id, chatId, w.title, JSON.stringify(w), ++pos],
-    );
-  }
-  return id;
-}
-
-export async function deleteDashboard(id: string) {
-  if (id === DEFAULT_DASHBOARD) throw new Error("cannot delete the pinned dashboard");
-  await query("DELETE FROM WIDGETS WHERE DASHBOARD_ID = ?", [id]);
-  await query("DELETE FROM DASHBOARDS WHERE ID = ?", [id]);
-}
-
-export async function listWidgets(dashboardId = DEFAULT_DASHBOARD): Promise<Widget[]> {
-  const rows = lower<Widget & { spec: unknown }>(
-    await query(
-      "SELECT ID, DASHBOARD_ID, CHAT_ID, TITLE, SPEC, POSITION, CREATED_AT FROM WIDGETS WHERE DASHBOARD_ID = ? ORDER BY POSITION, CREATED_AT",
-      [dashboardId],
-    ),
+  const rows = await sql<ActionItem>(
+    `SELECT action_item_id AS id, title, action_type, notes, owner, priority, status, TO_VARCHAR(due_date) AS due_date,
+            amount_usd, outcome_amount_usd, source, created_at
+       FROM AMAZON_FINANCE_APP.OPS.ACTION_ITEMS
+      WHERE status <> 'dismissed'
+      ORDER BY IFF(status = 'done', 1, 0), DECODE(priority, 'high', 0, 'medium', 1, 2), due_date NULLS LAST, created_at DESC`,
   );
   return rows.map((r) => ({
     ...r,
-    spec: typeof r.spec === "string" ? JSON.parse(r.spec) : r.spec,
-  })) as Widget[];
+    amount_usd: r.amount_usd == null ? null : Number(r.amount_usd),
+    outcome_amount_usd: r.outcome_amount_usd == null ? null : Number(r.outcome_amount_usd),
+  }));
 }
 
-export async function addWidget(chatId: string | null, spec: ChartSpec, dashboardId = DEFAULT_DASHBOARD) {
-  if (dashboardId === DEFAULT_DASHBOARD) await ensureDefaultDashboard();
-  const id = randomUUID();
-  await query(
-    "INSERT INTO WIDGETS (ID, DASHBOARD_ID, CHAT_ID, TITLE, SPEC, POSITION) SELECT ?, ?, ?, ?, PARSE_JSON(?), (SELECT COALESCE(MAX(POSITION), 0) + 1 FROM WIDGETS WHERE DASHBOARD_ID = ?)",
-    [id, dashboardId, chatId, spec.title, JSON.stringify(spec), dashboardId],
+export async function createActionItem(i: { title: string; action_type?: string; notes?: string | null; owner?: string | null; priority?: string; due_date?: string | null; amount_usd?: number | null; source?: string }) {
+  const r = ok(
+    await callProc("AMAZON_FINANCE_APP.OPS.CREATE_ACTION_ITEM", [
+      i.action_type ?? "other",
+      i.title,
+      null,
+      null,
+      i.amount_usd ?? null,
+      i.priority ?? "medium",
+      i.owner ?? null,
+      i.due_date ?? null,
+      i.notes ?? null,
+      i.source ?? "user",
+    ]),
   );
-  return id;
+  return String(r.action_item_id);
 }
 
-export async function deleteWidget(id: string) {
-  await query("DELETE FROM WIDGETS WHERE ID = ?", [id]);
+export async function updateActionItem(id: string, u: { status?: ActionStatus; owner?: string | null; outcome_amount_usd?: number | null; notes?: string | null }) {
+  return ok(
+    await callProc("AMAZON_FINANCE_APP.OPS.UPDATE_ACTION_ITEM", [id, u.status ?? null, u.owner ?? null, u.outcome_amount_usd ?? null, u.notes ?? null]),
+  );
+}
+
+// ---------- insights & recommendations ----------
+export async function listInsights(): Promise<Insight[]> {
+  return sql<Insight>(
+    `SELECT insight_id AS id, business_problem AS problem_area, severity, title, summary, metric_name AS metric,
+            current_value, comparison_value, change_pct, evidence_sql,
+            IFF(entity_id IS NULL, NULL, entity_type || ' ' || entity_id) AS related_entity, dashboard_id, generated_at
+       FROM AMAZON_FINANCE_APP.OPS.INSIGHTS
+      WHERE status = 'active'
+      ORDER BY DECODE(severity, 'high', 0, 'medium', 1, 2), generated_at DESC LIMIT 50`,
+  );
+}
+
+export async function listRecommendations(): Promise<Recommendation[]> {
+  const rows = await sql<Recommendation>(
+    `SELECT recommendation_id AS id, insight_id, title, rationale, action_type, entity_type, entity_id,
+            estimated_value_usd, confidence, status, action_item_id, expires_at, created_at
+       FROM AMAZON_FINANCE_APP.OPS.RECOMMENDED_ACTIONS
+      WHERE status = 'new' AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP())
+      ORDER BY estimated_value_usd DESC NULLS LAST LIMIT 50`,
+  );
+  return rows.map((r) => ({ ...r, estimated_value_usd: Number(r.estimated_value_usd ?? 0) }));
+}
+
+export async function acceptRecommendation(id: string, owner: string | null) {
+  return ok(await callProc("AMAZON_FINANCE_APP.OPS.ACCEPT_RECOMMENDATION", [id, owner]));
+}
+
+export async function dismissRecommendation(id: string, reason: string | null) {
+  return ok(await callProc("AMAZON_FINANCE_APP.OPS.DISMISS_RECOMMENDATION", [id, reason]));
 }

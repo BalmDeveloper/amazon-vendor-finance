@@ -23,35 +23,62 @@ export type ChartSpec = {
   /** Card footer, e.g. { value: 5.2, label: "this month" } → "Trending up by 5.2% this month" */
   trend?: { value: number; label?: string };
   footnote?: string;
+  /** The query that produced the data; lets a chat chart be saved as a live dashboard widget. */
+  sql?: string;
 };
 
-export type DashboardSpec = {
-  name: string;
-  description?: string;
-  widgets: ChartSpec[];
+/** How a stored widget maps its query columns to a chart (OPS.DASHBOARD_WIDGETS.CHART_CONFIG). */
+export type ChartConfig = {
+  x?: string;
+  y?: string[];
+  format?: "usd" | "percent" | "number";
+  span?: 1 | 2 | 3;
+  variant?: ChartSpec["variant"];
 };
 
-export type Dashboard = { id: string; name: string; created_at: string; widget_count: number };
+export type DashboardStatus = "draft" | "published" | "archived";
+
+export type Dashboard = {
+  id: string;
+  title: string;
+  description: string | null;
+  business_problem: string | null;
+  status: DashboardStatus;
+  created_by: string;
+  created_via: string;
+  updated_at: string;
+  widget_count: number;
+  mine: boolean;
+};
+
+/** A widget rendered with live data, or the error its query raised. */
+export type WidgetData = {
+  id: string;
+  position: number;
+  spec: ChartSpec;
+  error?: string;
+};
+
+export type ActionStatus = "open" | "in_progress" | "done" | "dismissed";
 
 export type ActionItem = {
   id: string;
-  chat_id: string | null;
   title: string;
-  detail?: string | null;
+  action_type?: string;
+  notes?: string | null;
   owner?: string | null;
   priority?: "low" | "medium" | "high";
-  status: "open" | "in_progress" | "done" | "dismissed";
+  status: ActionStatus;
   due_date?: string | null;
-  created_at?: string;
-  /** Platform fields (OPS.ACTION_ITEMS) */
-  action_type?: string | null;
-  source?: "agent" | "user" | "alert" | "recommendation" | string | null;
-  recommendation_id?: string | null;
+  amount_usd?: number | null;
   /** Amount actually recovered or collected, recorded on completion. */
   outcome_amount_usd?: number | null;
+  source?: "agent" | "user" | "alert" | "recommendation" | string | null;
+  recommendation_id?: string | null;
+  created_at?: string;
 };
 
-/** Events streamed from the sandbox agent and persisted on assistant messages. */
+/** Events streamed to the chat UI and persisted on assistant messages. */
 export type AgentEvent =
   | { type: "status"; text: string }
   | { type: "text"; text: string }
@@ -72,16 +99,7 @@ export type Message = {
   created_at: string;
 };
 
-export type Widget = {
-  id: string;
-  dashboard_id: string;
-  chat_id: string | null;
-  title: string;
-  spec: ChartSpec;
-  position: number;
-};
-
-/** MARTS.INSIGHTS row (see docs/plan.md, App interface). */
+/** OPS.INSIGHTS row (sql/04_ops_tables.sql). */
 export type Insight = {
   id: string;
   generated_at: string;
@@ -95,13 +113,15 @@ export type Insight = {
   change_pct: number | null;
   evidence_sql?: string | null;
   related_entity?: string | null;
+  dashboard_id?: string | null;
 };
 
-/** MARTS.RECOMMENDED_ACTIONS row (see docs/plan.md, App interface). */
+/** OPS.RECOMMENDED_ACTIONS row (sql/04_ops_tables.sql). */
 export type Recommendation = {
   id: string;
   insight_id: string | null;
   action_type: string;
+  title?: string;
   entity_type?: string | null;
   entity_id?: string | null;
   estimated_value_usd: number;
@@ -110,6 +130,7 @@ export type Recommendation = {
   status: "new" | "accepted" | "dismissed" | "expired";
   action_item_id?: string | null;
   expires_at?: string | null;
+  created_at?: string;
 };
 
 /** Success metrics from docs/plan.md, shown on the Today page. */

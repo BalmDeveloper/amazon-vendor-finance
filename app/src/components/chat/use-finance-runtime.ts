@@ -45,7 +45,7 @@ export function fromStored(rows: Message[]): Msg[] {
   );
 }
 
-export function useSalesRuntime(opts: { chatId?: string; onChatId: (id: string) => void; onSettled: () => void }) {
+export function useFinanceRuntime(opts: { chatId?: string; onChatId: (id: string) => void; onSettled: () => void }) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [status, setStatus] = useState("");
