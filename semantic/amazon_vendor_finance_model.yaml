@@ -1,0 +1,264 @@
+name: amazon_vendor_finance
+description: Amazon 1P vendor finance (anonymized demo data from Reason Automation) - invoices, remittance payments, co-op deductions and shortage disputes. All amounts are USD.
+tables:
+  - name: INVOICES
+    description: One row per vendor invoice submitted to Amazon, with status, amounts paid and variances.
+    base_table:
+      database: AMAZON_VENDOR_PL_FINANCE_REMITTANCE_AND_INVOICES_DEMO_DATASET
+      schema: PUBLIC
+      table: '"invoices_summaryv2"'
+    dimensions:
+      - name: INVOICE_NUMBER
+        expr: '"invoice_number"'
+        data_type: TEXT
+        description: Vendor invoice number.
+        synonyms: [invoice id, invoice]
+      - name: INVOICE_STATUS
+        expr: '"invoice_status"'
+        data_type: TEXT
+        sample_values: [PAID, PROCESSING, QUEUED_FOR_PAYMENT, "PAID, PRICE_DISCREPANCY", "PROCESSING, PENDING_AMAZON_ACTION"]
+        description: Payment status of the invoice. May combine a status and a reason, e.g. "PAID, PRICE_DISCREPANCY".
+        synonyms: [status, payment status]
+      - name: INVOICE_SOURCE
+        expr: '"invoice_source"'
+        data_type: TEXT
+        sample_values: [EDI, VendorCentralWeb]
+        description: Channel the invoice was submitted through.
+      - name: PAYEE
+        expr: '"payee"'
+        data_type: TEXT
+        description: Vendor payee code.
+        synonyms: [vendor code]
+      - name: MARKETPLACE
+        expr: '"marketplace"'
+        data_type: TEXT
+        sample_values: [US]
+        description: Amazon marketplace country.
+    time_dimensions:
+      - name: INVOICE_DATE
+        expr: '"invoice_date"'
+        data_type: TIMESTAMP_NTZ
+        description: Date of the invoice.
+      - name: PAYMENT_DUE_DATE
+        expr: '"payment_due_date"'
+        data_type: TIMESTAMP_NTZ
+        description: Date payment is due from Amazon.
+    measures:
+      - name: INVOICE_AMOUNT
+        expr: '"invoice_amount"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Amount billed on the invoice (USD).
+        synonyms: [invoiced amount, billed amount, invoice value]
+      - name: ACTUAL_PAID_AMOUNT
+        expr: '"actual_paid_amount"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Amount Amazon actually paid against the invoice (USD).
+        synonyms: [paid amount, amount paid]
+      - name: QUANTITY_VARIANCE
+        expr: '"quantity_variance"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Amount withheld due to quantity discrepancies (USD).
+        synonyms: [shortage, quantity shortfall]
+      - name: PRICE_VARIANCE
+        expr: '"price_variance"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Amount withheld due to price discrepancies (USD).
+      - name: QUICK_PAY_DISCOUNT
+        expr: '"quick_pay_discount"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Discount taken by Amazon for early payment (USD).
+      - name: QUEUED_FOR_PAYMENT
+        expr: '"queued_for_payment"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Amount approved and queued for payment (USD).
+
+  - name: REMITTANCE_LINES
+    description: Remittance lines - how each payment was applied to invoices and deductions. Negative invoice amounts are deductions (co-op, chargebacks, etc.).
+    base_table:
+      database: AMAZON_VENDOR_PL_FINANCE_REMITTANCE_AND_INVOICES_DEMO_DATASET
+      schema: PUBLIC
+      table: '"payments_invoices"'
+    dimensions:
+      - name: PAYMENT_NUMBER
+        expr: '"payment_number"'
+        data_type: TEXT
+        description: Payment (remittance) number this line belongs to.
+      - name: INVOICE_NUMBER
+        expr: '"invoice_number"'
+        data_type: TEXT
+        description: Invoice or deduction number on the remittance line.
+      - name: DESCRIPTION
+        expr: '"description"'
+        data_type: TEXT
+        description: Remittance line description, identifies the type of deduction or invoice.
+        synonyms: [deduction type, line type]
+    time_dimensions:
+      - name: INVOICE_DATE
+        expr: '"invoice_date"'
+        data_type: TIMESTAMP_NTZ
+        description: Date of the invoice or deduction on the line.
+    measures:
+      - name: LINE_INVOICE_AMOUNT
+        expr: '"invoice_amount"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Amount of the invoice or deduction on the remittance line (USD); negative values are deductions.
+      - name: LINE_AMOUNT_PAID
+        expr: '"amount_paid"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Amount paid on the remittance line (USD).
+        synonyms: [remitted amount]
+      - name: REMAINING_AMOUNT
+        expr: '"remaining_amount"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Amount still outstanding on the line (USD).
+      - name: TERMS_DISCOUNT_TAKEN
+        expr: '"terms_discount_taken"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Payment-terms discount taken (USD).
+
+  - name: PAYMENTS
+    description: One row per payment Amazon made to the vendor.
+    base_table:
+      database: AMAZON_VENDOR_PL_FINANCE_REMITTANCE_AND_INVOICES_DEMO_DATASET
+      schema: PUBLIC
+      table: '"payments_payments"'
+    primary_key:
+      columns: [PAYMENT_NUMBER]
+    dimensions:
+      - name: PAYMENT_NUMBER
+        expr: '"payment_number"'
+        data_type: TEXT
+        description: Payment (remittance) number.
+      - name: PAYMENT_STATUS
+        expr: '"payment_status"'
+        data_type: TEXT
+        sample_values: [Successful, Failed]
+        description: Whether the payment succeeded.
+      - name: PAYMENT_TYPE
+        expr: '"payment_type"'
+        data_type: TEXT
+        sample_values: [EFT]
+        description: Payment method.
+    time_dimensions:
+      - name: PAYMENT_DATE
+        expr: '"payment_date"'
+        data_type: TIMESTAMP_NTZ
+        description: Date of the payment.
+    measures:
+      - name: PAYMENT_AMOUNT
+        expr: '"amount_in_payment_currency"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Payment amount (USD).
+        synonyms: [payment total, remittance amount, cash received]
+
+  - name: COOP_DEDUCTIONS
+    description: Co-op (cooperative marketing) charges Amazon billed the vendor, by agreement.
+    base_table:
+      database: AMAZON_VENDOR_PL_FINANCE_REMITTANCE_AND_INVOICES_DEMO_DATASET
+      schema: PUBLIC
+      table: '"payments_coop"'
+    dimensions:
+      - name: COOP_INVOICE_ID
+        expr: '"invoice_id"'
+        data_type: TEXT
+        description: Co-op invoice id issued by Amazon.
+      - name: AGREEMENT_ID
+        expr: '"agreement_id"'
+        data_type: TEXT
+        description: Co-op agreement id.
+      - name: AGREEMENT_TITLE
+        expr: '"agreement_title"'
+        data_type: TEXT
+        description: Name of the co-op agreement.
+        synonyms: [agreement, coop program]
+      - name: FUNDING_TYPE
+        expr: '"funding_type"'
+        data_type: TEXT
+        sample_values: [Accrual, Straight Payment, Vendor Funded Sales Discount, Price Protection]
+        description: Type of co-op funding.
+    time_dimensions:
+      - name: COOP_INVOICE_DATE
+        expr: '"invoice_date"'
+        data_type: TIMESTAMP_NTZ
+        description: Date of the co-op invoice.
+    measures:
+      - name: COOP_AMOUNT
+        expr: '"original_balance"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Co-op charge amount (USD).
+        synonyms: [coop cost, coop expense, coop deduction]
+
+  - name: SHORTAGE_DISPUTES
+    description: Shortage disputes the vendor raised against Amazon deductions, at item level, with outcome.
+    base_table:
+      database: AMAZON_VENDOR_PL_FINANCE_REMITTANCE_AND_INVOICES_DEMO_DATASET
+      schema: PUBLIC
+      table: '"payments_dispute_management_details"'
+    dimensions:
+      - name: DISPUTE_ID
+        expr: '"dispute_id"'
+        data_type: TEXT
+        description: Dispute identifier.
+      - name: INVOICE_NUMBER
+        expr: '"invoice_number"'
+        data_type: TEXT
+        description: Invoice the dispute relates to.
+      - name: ASIN
+        expr: '"asin"'
+        data_type: TEXT
+        description: Amazon product identifier (ASIN).
+        synonyms: [product, item]
+      - name: PRODUCT_TITLE
+        expr: '"title"'
+        data_type: TEXT
+        description: Product title.
+      - name: DISPUTE_DECISION
+        expr: '"dispute_decision"'
+        data_type: TEXT
+        sample_values: [Approved, Denied, Partially approved]
+        description: Amazon's decision on the dispute; empty if undecided.
+        synonyms: [outcome, result]
+    time_dimensions:
+      - name: DISPUTE_DATE
+        expr: '"dispute_date"'
+        data_type: TIMESTAMP_NTZ
+        description: Date the dispute was raised.
+    measures:
+      - name: SHORTAGE_AMOUNT
+        expr: '"shortage_amount"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Value Amazon deducted as a shortage (USD).
+      - name: DISPUTE_AMOUNT
+        expr: '"dispute_amount"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Value disputed by the vendor (USD).
+      - name: RESOLVED_AMOUNT
+        expr: '"resolved_amount"'
+        data_type: FLOAT
+        default_aggregation: sum
+        description: Value recovered from the dispute (USD).
+        synonyms: [recovered amount, recovery]
+
+relationships:
+  - name: remittance_lines_to_payments
+    left_table: REMITTANCE_LINES
+    right_table: PAYMENTS
+    relationship_columns:
+      - left_column: PAYMENT_NUMBER
+        right_column: PAYMENT_NUMBER
+    join_type: left_outer
+    relationship_type: many_to_one
