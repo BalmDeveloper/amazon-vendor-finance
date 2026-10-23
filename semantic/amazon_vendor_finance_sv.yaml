@@ -1,0 +1,293 @@
+name: AMAZON_VENDOR_FINANCE_SV
+description: >
+  Amazon 1P vendor finance (anonymized demo data from Reason Automation): invoices, deduction claims,
+  payments, co-op charges and shortage disputes. All amounts are USD. Deduction amounts are positive
+  (money Amazon took). Provisions (reserves Amazon holds back and later releases) are not deductions.
+
+tables:
+  - name: INVOICES
+    description: One row per vendor invoice submitted to Amazon.
+    base_table: {database: AMAZON_FINANCE_APP, schema: STAGING, table: STG_INVOICES}
+    primary_key: {columns: [INVOICE_NUMBER]}
+    dimensions:
+      - name: INVOICE_NUMBER
+        expr: INVOICE_NUMBER
+        data_type: VARCHAR
+        description: Vendor invoice number.
+        synonyms: [invoice id, invoice]
+      - name: INVOICE_STATUS
+        expr: INVOICE_STATUS
+        data_type: VARCHAR
+        description: Full payment status, possibly with a reason, e.g. "PAID, PRICE_DISCREPANCY".
+        is_enum: true
+      - name: INVOICE_STATUS_GROUP
+        expr: INVOICE_STATUS_GROUP
+        data_type: VARCHAR
+        description: Main status only - PAID, PROCESSING or QUEUED_FOR_PAYMENT.
+        synonyms: [status, payment status]
+        is_enum: true
+      - name: INVOICE_SOURCE
+        expr: INVOICE_SOURCE
+        data_type: VARCHAR
+        description: Channel the invoice was submitted through (EDI or VendorCentralWeb).
+        is_enum: true
+    time_dimensions:
+      - name: INVOICE_DATE
+        expr: INVOICE_DATE
+        data_type: DATE
+        description: Invoice date.
+      - name: PAYMENT_DUE_DATE
+        expr: PAYMENT_DUE_DATE
+        data_type: DATE
+        description: Date payment is due from Amazon.
+    facts:
+      - {name: INVOICE_AMOUNT, expr: INVOICE_AMOUNT, data_type: NUMBER, description: Invoice amount.}
+      - {name: PAID_AMOUNT, expr: PAID_AMOUNT, data_type: NUMBER, description: Amount paid.}
+      - {name: UNPAID_AMOUNT, expr: UNPAID_AMOUNT, data_type: NUMBER, description: Invoice minus paid.}
+      - {name: PRICE_VARIANCE, expr: PRICE_VARIANCE, data_type: NUMBER, description: Price variance.}
+      - {name: QUANTITY_VARIANCE, expr: QUANTITY_VARIANCE, data_type: NUMBER, description: Quantity variance.}
+    metrics:
+      - name: TOTAL_INVOICED
+        expr: SUM(INVOICES.INVOICE_AMOUNT)
+        description: Total amount invoiced to Amazon (USD).
+        synonyms: [invoiced, billed, revenue invoiced, gross sales]
+      - name: TOTAL_PAID
+        expr: SUM(INVOICES.PAID_AMOUNT)
+        description: Total amount Amazon paid against invoices (USD).
+        synonyms: [paid, cash received, collected]
+      - name: TOTAL_UNPAID
+        expr: SUM(INVOICES.UNPAID_AMOUNT)
+        description: Invoiced minus paid (USD). Includes short-pays on paid invoices and invoices not yet paid.
+        synonyms: [outstanding, unpaid, receivable]
+      - name: INVOICE_COUNT
+        expr: COUNT(INVOICES.INVOICE_NUMBER)
+        description: Number of invoices.
+      - name: COLLECTION_RATE
+        expr: DIV0(SUM(INVOICES.PAID_AMOUNT), SUM(INVOICES.INVOICE_AMOUNT))
+        description: Share of invoiced amount that has been paid (0-1).
+      - name: TOTAL_PRICE_VARIANCE
+        expr: SUM(INVOICES.PRICE_VARIANCE)
+        description: Amount withheld for price discrepancies (USD).
+      - name: TOTAL_QUANTITY_VARIANCE
+        expr: SUM(INVOICES.QUANTITY_VARIANCE)
+        description: Amount withheld for quantity discrepancies (USD).
+
+  - name: DEDUCTIONS
+    description: >
+      One row per deduction claim Amazon made against the vendor (shortages, damage allowances, chargebacks,
+      unlabeled deductions, etc.). Provisions are excluded. Use DEDUCTED_AMOUNT for money actually taken.
+    base_table: {database: AMAZON_FINANCE_APP, schema: STAGING, table: STG_DEDUCTION_CLAIMS}
+    primary_key: {columns: [CLAIM_ID]}
+    dimensions:
+      - name: CLAIM_ID
+        expr: CLAIM_ID
+        data_type: VARCHAR
+        description: Deduction claim reference.
+      - name: BASE_INVOICE_NUMBER
+        expr: BASE_INVOICE_NUMBER
+        data_type: VARCHAR
+        description: The vendor invoice the claim was raised against (reliable for shortage claims).
+      - name: CATEGORY
+        expr: CATEGORY
+        data_type: VARCHAR
+        description: >
+          Deduction type: Shortage, Unlabeled (no description from Amazon), Damage allowance,
+          Vendor services (AVS/SVS), Missed adjustment, Operational chargeback, Returns, Overcharge, Other.
+        synonyms: [deduction type, chargeback type, deduction category]
+        is_enum: true
+    time_dimensions:
+      - name: CLAIM_DATE
+        expr: CLAIM_DATE
+        data_type: DATE
+        description: Date of the deduction claim.
+        synonyms: [deduction date]
+    facts:
+      - {name: CLAIM_AMOUNT, expr: CLAIM_AMOUNT, data_type: NUMBER, description: Claim amount.}
+      - {name: DEDUCTED_AMOUNT, expr: DEDUCTED_AMOUNT, data_type: NUMBER, description: Cash deducted.}
+      - {name: NOT_YET_APPLIED_AMOUNT, expr: NOT_YET_APPLIED_AMOUNT, data_type: NUMBER, description: Claimed but not yet taken.}
+    metrics:
+      - name: TOTAL_DEDUCTED
+        expr: SUM(DEDUCTIONS.DEDUCTED_AMOUNT)
+        description: Cash Amazon actually deducted from payments (USD, positive). The default deduction measure.
+        synonyms: [deductions, chargebacks, money deducted, deducted]
+      - name: TOTAL_CLAIMED
+        expr: SUM(DEDUCTIONS.CLAIM_AMOUNT)
+        description: Total amount Amazon claimed (USD), counting each claim once.
+      - name: CLAIMED_NOT_YET_DEDUCTED
+        expr: SUM(DEDUCTIONS.NOT_YET_APPLIED_AMOUNT)
+        description: Amount Amazon has claimed but not yet taken from payments (USD) - an early warning of future deductions.
+        synonyms: [pending deductions, upcoming deductions]
+      - name: DEDUCTION_COUNT
+        expr: COUNT(DEDUCTIONS.CLAIM_ID)
+        description: Number of deduction claims.
+
+  - name: PAYMENTS
+    description: One row per payment Amazon made to the vendor.
+    base_table: {database: AMAZON_FINANCE_APP, schema: STAGING, table: STG_PAYMENTS}
+    primary_key: {columns: [PAYMENT_NUMBER]}
+    dimensions:
+      - {name: PAYMENT_NUMBER, expr: PAYMENT_NUMBER, data_type: VARCHAR, description: Payment number.}
+      - {name: PAYMENT_STATUS, expr: PAYMENT_STATUS, data_type: VARCHAR, description: Successful or Failed., is_enum: true}
+    time_dimensions:
+      - {name: PAYMENT_DATE, expr: PAYMENT_DATE, data_type: DATE, description: Payment date.}
+    facts:
+      - {name: PAYMENT_AMOUNT, expr: PAYMENT_AMOUNT, data_type: NUMBER, description: Payment amount.}
+    metrics:
+      - name: TOTAL_PAYMENTS
+        expr: SUM(PAYMENTS.PAYMENT_AMOUNT)
+        description: Total cash paid by Amazon in payments (USD), net of deductions and reserves.
+        synonyms: [net cash received, remittance total]
+      - {name: PAYMENT_COUNT, expr: COUNT(PAYMENTS.PAYMENT_NUMBER), description: Number of payments.}
+
+  - name: COOP
+    description: Co-op (cooperative marketing) charges Amazon billed the vendor, by agreement.
+    base_table: {database: AMAZON_FINANCE_APP, schema: STAGING, table: STG_COOP}
+    dimensions:
+      - {name: COOP_INVOICE_ID, expr: COOP_INVOICE_ID, data_type: VARCHAR, description: Co-op invoice id.}
+      - {name: AGREEMENT_ID, expr: AGREEMENT_ID, data_type: VARCHAR, description: Co-op agreement id.}
+      - {name: AGREEMENT_TITLE, expr: AGREEMENT_TITLE, data_type: VARCHAR, description: Co-op agreement name., synonyms: [agreement, coop program]}
+      - {name: FUNDING_TYPE, expr: FUNDING_TYPE, data_type: VARCHAR, description: "Accrual, Straight Payment, Vendor Funded Sales Discount or Price Protection.", is_enum: true}
+    time_dimensions:
+      - {name: COOP_DATE, expr: COOP_DATE, data_type: DATE, description: Co-op invoice date.}
+    facts:
+      - {name: COOP_AMOUNT, expr: COOP_AMOUNT, data_type: NUMBER, description: Co-op amount.}
+    metrics:
+      - name: TOTAL_COOP
+        expr: SUM(COOP.COOP_AMOUNT)
+        description: Total co-op charges (USD).
+        synonyms: [coop spend, coop cost, marketing allowance]
+
+  - name: DISPUTES
+    description: Shortage disputes the vendor raised, at item level, with Amazon's decision and the amount recovered.
+    base_table: {database: AMAZON_FINANCE_APP, schema: STAGING, table: STG_DISPUTES}
+    dimensions:
+      - {name: DISPUTE_ID, expr: DISPUTE_ID, data_type: VARCHAR, description: Dispute id.}
+      - {name: DISPUTE_INVOICE_NUMBER, expr: INVOICE_NUMBER, data_type: VARCHAR, description: Invoice the dispute relates to.}
+      - {name: PO_NUMBER, expr: PO_NUMBER, data_type: VARCHAR, description: Purchase order number., synonyms: [PO]}
+      - {name: ASIN, expr: ASIN, data_type: VARCHAR, description: Amazon product id., synonyms: [product id, item]}
+      - {name: PRODUCT_TITLE, expr: PRODUCT_TITLE, data_type: VARCHAR, description: Product name., synonyms: [product]}
+      - name: DISPUTE_STATUS
+        expr: DISPUTE_STATUS
+        data_type: VARCHAR
+        description: Approved, Partially approved, Denied or Pending.
+        synonyms: [decision, outcome]
+        is_enum: true
+    time_dimensions:
+      - {name: DISPUTE_DATE, expr: DISPUTE_DATE, data_type: DATE, description: Date the dispute was raised.}
+    facts:
+      - {name: SHORTAGE_AMOUNT, expr: SHORTAGE_AMOUNT, data_type: NUMBER, description: Shortage amount.}
+      - {name: DISPUTE_AMOUNT, expr: DISPUTE_AMOUNT, data_type: NUMBER, description: Disputed amount.}
+      - {name: RESOLVED_AMOUNT, expr: RESOLVED_AMOUNT, data_type: NUMBER, description: Recovered amount.}
+    metrics:
+      - name: TOTAL_SHORTAGE_IN_DISPUTES
+        expr: SUM(DISPUTES.SHORTAGE_AMOUNT)
+        description: Shortage value on the disputed items (USD).
+      - name: TOTAL_RECOVERED
+        expr: SUM(DISPUTES.RESOLVED_AMOUNT)
+        description: Amount recovered from disputes (USD).
+        synonyms: [recovered, recovery, won back]
+      - name: DISPUTE_RECOVERY_RATE
+        expr: DIV0(SUM(DISPUTES.RESOLVED_AMOUNT), SUM(DISPUTES.SHORTAGE_AMOUNT))
+        description: Recovered divided by shortage value on disputed items (0-1).
+      - name: DISPUTE_COUNT
+        expr: COUNT(DISTINCT DISPUTES.DISPUTE_ID)
+        description: Number of disputes.
+
+relationships:
+  - name: DEDUCTIONS_TO_INVOICES
+    left_table: DEDUCTIONS
+    right_table: INVOICES
+    relationship_columns:
+      - {left_column: BASE_INVOICE_NUMBER, right_column: INVOICE_NUMBER}
+
+module_custom_instructions:
+  sql_generation: |
+    - "Deductions" means DEDUCTIONS.TOTAL_DEDUCTED (cash actually taken) unless the user asks for claimed amounts.
+    - Never treat provisions or reserves as deductions; they are not in this model.
+    - Shortage recovery rate across the business = DISPUTES.TOTAL_RECOVERED / DEDUCTIONS.TOTAL_DEDUCTED where CATEGORY = 'Shortage'.
+    - Group by month with DATE_TRUNC('MONTH', <date>). Round money to 2 decimals and show USD.
+
+verified_queries:
+  - name: deductions_by_category
+    question: What are total deductions by category?
+    use_as_onboarding_question: true
+    sql: |
+      SELECT category, SUM(deducted_amount) AS total_deducted, COUNT(*) AS claims
+      FROM deductions
+      GROUP BY category
+      ORDER BY total_deducted DESC
+  - name: shortage_recovery_rate
+    question: What is our shortage recovery rate?
+    use_as_onboarding_question: true
+    sql: |
+      SELECT
+        (SELECT SUM(deducted_amount) FROM deductions WHERE category = 'Shortage') AS shortage_deducted,
+        (SELECT SUM(resolved_amount) FROM disputes) AS recovered,
+        DIV0((SELECT SUM(resolved_amount) FROM disputes),
+             (SELECT SUM(deducted_amount) FROM deductions WHERE category = 'Shortage')) AS recovery_rate
+  - name: invoiced_vs_paid_by_month
+    question: How much did we invoice versus get paid each month?
+    sql: |
+      SELECT DATE_TRUNC('MONTH', invoice_date) AS month,
+             SUM(invoice_amount) AS invoiced, SUM(paid_amount) AS paid,
+             SUM(unpaid_amount) AS unpaid
+      FROM invoices
+      GROUP BY month
+      ORDER BY month
+  - name: unpaid_invoices_by_status
+    question: Which invoices are still unpaid and how much do they total?
+    use_as_onboarding_question: true
+    sql: |
+      SELECT invoice_status_group, COUNT(*) AS invoices, SUM(unpaid_amount) AS unpaid
+      FROM invoices
+      WHERE invoice_status_group <> 'PAID'
+      GROUP BY invoice_status_group
+      ORDER BY unpaid DESC
+  - name: shortage_deductions_by_month
+    question: How much did Amazon deduct for shortages each month?
+    sql: |
+      SELECT DATE_TRUNC('MONTH', claim_date) AS month, SUM(deducted_amount) AS shortage_deducted, COUNT(*) AS claims
+      FROM deductions
+      WHERE category = 'Shortage'
+      GROUP BY month
+      ORDER BY month
+  - name: claimed_not_yet_deducted
+    question: How much has Amazon claimed but not yet deducted?
+    sql: |
+      SELECT category, SUM(not_yet_applied_amount) AS claimed_not_yet_deducted
+      FROM deductions
+      GROUP BY category
+      HAVING SUM(not_yet_applied_amount) > 0
+      ORDER BY claimed_not_yet_deducted DESC
+  - name: dispute_outcomes
+    question: What were the outcomes of our shortage disputes?
+    sql: |
+      SELECT dispute_status, COUNT(DISTINCT dispute_id) AS disputes,
+             SUM(shortage_amount) AS shortage, SUM(resolved_amount) AS recovered
+      FROM disputes
+      GROUP BY dispute_status
+      ORDER BY shortage DESC
+  - name: top_shortage_asins
+    question: Which products have the most shortage in disputes?
+    sql: |
+      SELECT asin, ANY_VALUE(product_title) AS product, SUM(shortage_amount) AS shortage,
+             SUM(resolved_amount) AS recovered
+      FROM disputes
+      GROUP BY asin
+      ORDER BY shortage DESC
+      LIMIT 10
+  - name: coop_by_agreement
+    question: How much co-op did we pay by agreement?
+    sql: |
+      SELECT agreement_title, funding_type, SUM(coop_amount) AS coop
+      FROM coop
+      GROUP BY agreement_title, funding_type
+      ORDER BY coop DESC
+      LIMIT 20
+  - name: price_variance_invoices
+    question: Which invoices had price discrepancies?
+    sql: |
+      SELECT invoice_number, invoice_date, invoice_amount, paid_amount, price_variance
+      FROM invoices
+      WHERE price_variance <> 0 OR invoice_status ILIKE '%PRICE_DISCREPANCY%'
+      ORDER BY ABS(price_variance) DESC

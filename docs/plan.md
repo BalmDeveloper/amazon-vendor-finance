@@ -10,13 +10,13 @@ Use the Amazon 1P vendor finance data to make the business run better: recover m
 | **App (teammate)** | The Next.js Snowflake App (Phase 6). It builds only against the objects in the **App interface**, never the raw shared tables. |
 
 ## Business problems (in priority order)
-Figures come from the demo data (July 2021 – April 2025) and were checked with direct SQL on 2026-10-23.
+Figures come from the demo data (July 2021 – April 2025) and were checked with direct SQL on 2026-10-23. Deduction figures are **cash actually deducted** (see Data facts for why claim amounts on remittance lines can't simply be summed).
 
-1. **Shortage recovery.** Shortage Claim remittance lines total **−$3.99M** across 1,583 lines, while shortage disputes recovered only **$43.7K**. Even if the dispute table covers only part of the period (it starts Feb 2023), this is the largest recoverable amount. The workflow: find shortages that can still be disputed → create an action item → track the outcome → measure the recovery rate.
-2. **Unexplained deductions.** **−$3.98M** across 594 remittance lines has no description (`-____-`). Classify them (`AI_CLASSIFY` plus invoice-number patterns) so every deducted dollar has a category and an owner. Smaller categories to track as well: Damage Allowance (−$276K), AVS - SVS (−$220K), Missed Adjustment Claim (−$115K), and returns, prep, freight and carton fees (about −$140K).
-3. **Cash collection.** Invoiced **$10.29M**, paid **$10.00M**, about **$294K unpaid**. That includes 60 invoices worth about $150K still processing, pending Amazon action or queued for payment, plus price and quantity variances on paid invoices.
+1. **Shortage recovery.** Amazon deducted **$3.14M** for shortages across 1,470 claims, while shortage disputes recovered only **$43.7K**. Even if the dispute table covers only part of the period (it starts Feb 2023), this is the largest recoverable amount. The workflow: find shortages that can still be disputed → create an action item → track the outcome → measure the recovery rate.
+2. **Unexplained deductions.** **$1.82M** was deducted across 595 claims with no description from Amazon (`-____-`); those claims total $3.99M. Classify them (`AI_CLASSIFY` plus invoice-number patterns) so every deducted dollar has a category and an owner. Smaller categories to track as well: Missed adjustment ($99K), Damage allowance ($98K), AVS/SVS ($94K), operational chargebacks ($70K) and returns ($60K). Total deducted across all categories is **$5.39M**.
+3. **Cash collection.** Invoiced **$10.29M**, paid **$10.00M** (a collection rate of 97.1%), about **$294K unpaid**. That includes 60 invoices worth about $150K still processing, pending Amazon action or queued for payment, plus price and quantity variances on paid invoices. A further **$2.49M** has been claimed by Amazon but not yet deducted, which is an early warning of future deductions.
 
-**To confirm before using in any metric:** `PROVISION_FOR_RECEIVABLE` / `PROVISION_FOR_AGED_RECEIVABLE` lines (−$63.3M across 1,223 lines) look like accounting entries rather than money Amazon actually kept. Exclude them from deduction totals until confirmed.
+**Provisions are not deductions.** `PROVISION_FOR_RECEIVABLE` lines hold back cash (−$20.53M applied) and `PROVISION_FOR_RECEIVABLE-R` lines release it (+$20.38M), leaving about $146K currently held. Provisions are tracked as a separate "reserve held" metric and never counted as deductions.
 
 **Success metrics:** shortage recovery rate (recovered ÷ shortage deducted), share of deduction dollars categorized, unpaid amount older than 60 days, and time from a new deduction to an action item.
 
@@ -30,6 +30,10 @@ Figures come from the demo data (July 2021 – April 2025) and were checked with
   - `payments_coop`: co-op charges.
   - `payments_dispute_management_details`: shortage disputes.
 - **Gaps:** `payments_invoices_expanded` is empty, so the listing's sample "Quick P&L" query returns nothing.
+- **Remittance line descriptions:** `/____/` = a vendor invoice being paid (+$14.6M); `-____-` = a deduction with no label; `PROVISION_FOR_RECEIVABLE` / `-R` = a reserve held back / released.
+- **Repeated claim amounts:** a deduction claim applied across several payments repeats its **full** amount on each remittance line, while `amount_paid` splits it. Never sum `invoice_amount` over remittance lines. Use `STAGING.STG_DEDUCTION_CLAIMS` (one row per claim, with `claim_amount` counted once and `deducted_amount` as the cash actually taken).
+- **Shortage claims link to invoices:** a shortage claim number is `<invoice_number>-<n>SC` (1,571 of 1,583 lines match an invoice). `STG_REMITTANCE_LINES.base_invoice_number` holds the extracted invoice number.
+- **Disputes barely link to claims:** only 76 of 721 disputed invoice numbers match a shortage claim's invoice, and 204 match an invoice at all. Measure recovery from the dispute table directly; treat claim-level "disputed or not" as approximate.
 
 ## The five layers: what we build in each
 | Layer | Snowflake build |
@@ -160,7 +164,7 @@ app/                                  Next.js app (teammate)
 ```
 
 ## Verification
-- **Semantic view:** verified queries match hand-written SQL. Baselines: $10.29M invoiced, $10.00M paid, −$3.99M shortage claims, $43.7K recovered.
+- **Semantic view:** verified queries match hand-written SQL. Baselines: $10.29M invoiced, $10.00M paid, $3.14M shortages deducted, $5.39M total deducted, $43.7K recovered.
 - **Classification:** a manual review of 50 classified lines reaches at least 90% agreement before results reach the dashboards.
 - **Dynamic tables:** they refresh, and their totals match the source tables.
 - **Agent:** questions on each problem, a mixed metric-plus-search question, and an action request that creates a row in `ACTION_ITEMS` with `created_by` set.
@@ -176,7 +180,6 @@ app/                                  Next.js app (teammate)
 - A Slack webhook URL, stored with `/secrets`.
 - Alert thresholds (e.g. a disputable shortage above $5K, unpaid for more than 60 days).
 - Which teammates get `AMZ_FIN_USER`.
-- Confirmation of how to treat the provision lines.
 - The Amazon dispute window (days from deduction) to use for "disputable" and "window closing". This needs to come from your Vendor Central terms; the data doesn't contain it.
 
 ## Known constraints
