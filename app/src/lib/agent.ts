@@ -73,6 +73,8 @@ class EventMapper {
         priority: (input.priority as ActionItem["priority"]) ?? "medium",
         due_date: (input.due_date as string) || null,
         amount_usd: input.amount_usd == null ? null : Number(input.amount_usd),
+        action_type: (input.action_type as string) || undefined,
+        source: "agent",
         status: "open",
       };
       this.emit({ type: "action_items", items: [item] });
